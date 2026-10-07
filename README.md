@@ -12,6 +12,10 @@
 
 <br/>
 
+[![Open your Home Assistant and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=copystring&repository=astro-weather-card&category=plugin)
+
+<br/><br/>
+
 <img src="images/preview-desktop.png" alt="Astro Weather Card Desktop Preview" width="100%">
 
 </div>
