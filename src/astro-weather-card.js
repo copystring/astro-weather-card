@@ -247,7 +247,7 @@ class AstroWeatherCard extends HTMLElement {
     const today = days[0];
 
     const getVal = (entityId) => {
-      if (!entityId || !this._hass.states[entityId]) return null;
+      if (!entityId || !this._hass?.states || !this._hass.states[entityId]) return null;
       return this._hass.states[entityId].state;
     };
 
