@@ -120,6 +120,7 @@ cloud_high_entity: sensor.astroweather_backyard_cloud_high
 | `humidity_entity` | `string` | *auto* | Sensor reporting relative humidity in `%` |
 | `dewpoint_entity` | `string` | *auto* | Sensor reporting dew point temperature in `°C` |
 | `condition_entity` | `string` | *auto* | Sensor reporting 0–100 observation suitability score |
+| `language` | `string` | *auto* | UI language (`en`, `de`). Automatically detects your Home Assistant language by default |
 | `show_targets` | `boolean` | `true` | Show or hide tonight's visible targets card |
 | `show_forecast` | `boolean` | `true` | Show or hide the 7-day observation forecast |
 

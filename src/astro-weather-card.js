@@ -6,7 +6,8 @@
  * License: MIT
  */
 
-const CARD_VERSION = "1.0.0";
+const CARD_VERSION = "1.1.0";
+import { localize } from "./localize.js";
 
 console.info(
   `%c ASTRO-WEATHER-CARD %c v${CARD_VERSION} `,
@@ -74,20 +75,38 @@ class AstroWeatherCard extends HTMLElement {
     return 6;
   }
 
+  _getLang() {
+    if (this._config && this._config.language) {
+      return this._config.language.toLowerCase();
+    }
+    if (this._hass) {
+      const l = (this._hass.locale?.language || this._hass.language || 'en').toLowerCase();
+      if (l.startsWith('de')) return 'de';
+    }
+    return 'en';
+  }
+
+  l(key) {
+    return localize(key, this._getLang());
+  }
+
+
   // Hilfsmethode: Standarddaten für die 7-Tage-Vorschau
   _getForecastData() {
+    const lang = this._getLang();
+    const l = (k) => localize(k, lang);
     return [
       {
-        name: "Heute", fullDate: "Dienstag, 07. Oktober",
-        verdict: "Heute nicht aufbauen", color: "red", score: 17,
-        desc: "Dichter Hochnebel blockiert die Sterne. Hohe Feuchte lässt die Optik beschlagen.",
-        clouds: 69, cloudLow: 85, cloudMid: 15, cloudHigh: 0, cloudStatus: "Hochnebel",
-        dew: 98, dewpoint: 7.5, dewStatus: "Tau-Alarm",
-        wind: 3.6, windStatus: "Windstill", windNote: "Kein Wackeln am Stativ",
-        seeing: 1.37, seeingStatus: "Ruhig", seeingNote: "Scharfe Planetendetails",
-        moon: "🌘 15%", moonDetail: "Mond: 15% (Aufgang 03:24)", moonX: 395, moonY: 55,
-        sunset: "19:18 Untergang", sunrise: "06:58 Aufgang", coreWindow: "20:36 – 05:40 Uhr",
-        twilightEvening: "19:18 (Einnorden)", twilightNight: "20:36 bis 05:40 Dunkle Nacht", twilightMorning: "06:58 (Dämmerung)",
+        name: l("days.today"), fullDate: lang === "de" ? "Dienstag, 07. Oktober" : "Tuesday, Oct 07",
+        verdict: l("verdicts.do_not_setup"), color: "red", score: 17,
+        desc: l("verdicts.do_not_setup_desc"),
+        clouds: 69, cloudLow: 85, cloudMid: 15, cloudHigh: 0, cloudStatus: lang === "de" ? "Hochnebel" : "High Fog",
+        dew: 98, dewpoint: 7.5, dewStatus: l("dew_alert"),
+        wind: 3.6, windStatus: l("windstill"), windNote: l("no_shaking"),
+        seeing: 1.37, seeingStatus: l("steady"), seeingNote: l("sharp_details"),
+        moon: "🌘 15%", moonDetail: `${l("moon")}: 15% (${l("moon_rise")} 03:24)`, moonX: 395, moonY: 55,
+        sunset: `19:18 ${l("sunset")}`, sunrise: `06:58 ${l("sunrise")}`, coreWindow: "20:36 – 05:40",
+        twilightEvening: `19:18 (${l("dusk")})`, twilightNight: `20:36 - 05:40 ${l("dark_night")}`, twilightMorning: `06:58 (${l("dawn")})`,
         hourly: [
           { time: "20:00", clouds: 75, seeing: "1.5″", cx: 125, cy: 110 },
           { time: "22:00", clouds: 72, seeing: "1.4″", cx: 220, cy: 60 },
@@ -98,16 +117,16 @@ class AstroWeatherCard extends HTMLElement {
         ]
       },
       {
-        name: "Mittwoch", fullDate: "Mittwoch, 08. Oktober",
-        verdict: "Bedeckt & Schauer", color: "red", score: 13,
-        desc: "Durchziehende Regenfront und dichte Wolkendecke. Teleskop im Trockenen lassen.",
-        clouds: 90, cloudLow: 90, cloudMid: 40, cloudHigh: 10, cloudStatus: "Regenfront",
-        dew: 95, dewpoint: 8.0, dewStatus: "Sehr feucht",
-        wind: 12.4, windStatus: "Mäßig", windNote: "Leichte Vibrationen",
-        seeing: 2.10, seeingStatus: "Unruhig", seeingNote: "Flimmern am Planeten",
-        moon: "🌘 9%", moonDetail: "Mond: 9% (Aufgang 04:40)", moonX: 430, moonY: 70,
-        sunset: "19:15 Untergang", sunrise: "07:00 Aufgang", coreWindow: "20:33 – 05:42 Uhr",
-        twilightEvening: "19:15 (Einnorden)", twilightNight: "20:33 bis 05:42 Dunkle Nacht", twilightMorning: "07:00 (Dämmerung)",
+        name: l("days.wed"), fullDate: lang === "de" ? "Mittwoch, 08. Oktober" : "Wednesday, Oct 08",
+        verdict: l("verdicts.rain_front"), color: "red", score: 13,
+        desc: l("verdicts.rain_front_desc"),
+        clouds: 90, cloudLow: 90, cloudMid: 40, cloudHigh: 10, cloudStatus: lang === "de" ? "Regenfront" : "Rain Front",
+        dew: 95, dewpoint: 8.0, dewStatus: l("dew_risk"),
+        wind: 12.4, windStatus: l("moderate"), windNote: lang === "de" ? "Leichte Vibrationen" : "Minor vibration",
+        seeing: 2.10, seeingStatus: l("turbulent"), seeingNote: lang === "de" ? "Flimmern am Planeten" : "Planetary blur",
+        moon: "🌘 9%", moonDetail: `${l("moon")}: 9% (${l("moon_rise")} 04:40)`, moonX: 430, moonY: 70,
+        sunset: `19:15 ${l("sunset")}`, sunrise: `07:00 ${l("sunrise")}`, coreWindow: "20:33 – 05:42",
+        twilightEvening: `19:15 (${l("dusk")})`, twilightNight: `20:33 - 05:42 ${l("dark_night")}`, twilightMorning: `07:00 (${l("dawn")})`,
         hourly: [
           { time: "20:00", clouds: 95, seeing: "2.3″", cx: 125, cy: 110 },
           { time: "22:00", clouds: 90, seeing: "2.1″", cx: 220, cy: 60 },
@@ -118,16 +137,16 @@ class AstroWeatherCard extends HTMLElement {
         ]
       },
       {
-        name: "Donnerstag", fullDate: "Donnerstag, 09. Oktober",
-        verdict: "Dauerregen & Sturm", color: "red", score: 8,
-        desc: "Kräftiger Wind und geschlossene Wolkendecke. Absolut ungeeignet.",
-        clouds: 99, cloudLow: 95, cloudMid: 80, cloudHigh: 50, cloudStatus: "Stark bewölkt",
-        dew: 99, dewpoint: 9.2, dewStatus: "Nass",
-        wind: 24.5, windStatus: "Böig", windNote: "Starkes Wackeln",
-        seeing: 2.80, seeingStatus: "Schlecht", seeingNote: "Starkes Flackern",
-        moon: "🌘 4%", moonDetail: "Mond: 4% (Aufgang 05:55)", moonX: 470, moonY: 90,
-        sunset: "19:13 Untergang", sunrise: "07:02 Aufgang", coreWindow: "20:31 – 05:44 Uhr",
-        twilightEvening: "19:13 (Einnorden)", twilightNight: "20:31 bis 05:44 Dunkle Nacht", twilightMorning: "07:02 (Dämmerung)",
+        name: l("days.thu"), fullDate: lang === "de" ? "Donnerstag, 09. Oktober" : "Thursday, Oct 09",
+        verdict: l("verdicts.stormy"), color: "red", score: 8,
+        desc: l("verdicts.stormy_desc"),
+        clouds: 99, cloudLow: 95, cloudMid: 80, cloudHigh: 50, cloudStatus: lang === "de" ? "Stark bewölkt" : "Overcast",
+        dew: 99, dewpoint: 9.2, dewStatus: lang === "de" ? "Nass" : "Wet",
+        wind: 24.5, windStatus: l("gusty"), windNote: lang === "de" ? "Starkes Wackeln" : "Heavy vibration",
+        seeing: 2.80, seeingStatus: l("poor"), seeingNote: lang === "de" ? "Starkes Flackern" : "Severe scintillation",
+        moon: "🌘 4%", moonDetail: `${l("moon")}: 4% (${l("moon_rise")} 05:55)`, moonX: 470, moonY: 90,
+        sunset: `19:13 ${l("sunset")}`, sunrise: `07:02 ${l("sunrise")}`, coreWindow: "20:31 – 05:44",
+        twilightEvening: `19:13 (${l("dusk")})`, twilightNight: `20:31 - 05:44 ${l("dark_night")}`, twilightMorning: `07:02 (${l("dawn")})`,
         hourly: [
           { time: "20:00", clouds: 100, seeing: "2.9″", cx: 125, cy: 110 },
           { time: "22:00", clouds: 99, seeing: "2.8″", cx: 220, cy: 60 },
@@ -138,16 +157,16 @@ class AstroWeatherCard extends HTMLElement {
         ]
       },
       {
-        name: "Freitag", fullDate: "Freitag, 10. Oktober",
-        verdict: "Regenschauer & Wolken", color: "red", score: 15,
-        desc: "Nur kurze Wolkenlücken in der zweiten Nachthälfte. Hohes Schauerrisiko.",
-        clouds: 85, cloudLow: 80, cloudMid: 60, cloudHigh: 30, cloudStatus: "Wolkig",
-        dew: 92, dewpoint: 6.8, dewStatus: "Tau-Gefahr",
-        wind: 9.8, windStatus: "Leichte Brise", windNote: "Akzeptabel",
-        seeing: 1.85, seeingStatus: "Mäßig", seeingNote: "Brauchbar für Mond",
-        moon: "🌘 1%", moonDetail: "Mond: 1% (Aufgang 07:12)", moonX: 520, moonY: 115,
-        sunset: "19:11 Untergang", sunrise: "07:03 Aufgang", coreWindow: "20:29 – 05:46 Uhr",
-        twilightEvening: "19:11 (Einnorden)", twilightNight: "20:29 bis 05:46 Dunkle Nacht", twilightMorning: "07:03 (Dämmerung)",
+        name: l("days.fri"), fullDate: lang === "de" ? "Freitag, 10. Oktober" : "Friday, Oct 10",
+        verdict: l("verdicts.showers"), color: "red", score: 15,
+        desc: l("verdicts.showers_desc"),
+        clouds: 85, cloudLow: 80, cloudMid: 60, cloudHigh: 30, cloudStatus: lang === "de" ? "Wolkig" : "Cloudy",
+        dew: 92, dewpoint: 6.8, dewStatus: l("dew_risk"),
+        wind: 9.8, windStatus: l("calm"), windNote: lang === "de" ? "Akzeptabel" : "Acceptable",
+        seeing: 1.85, seeingStatus: l("moderate"), seeingNote: lang === "de" ? "Brauchbar für Mond" : "Good for moon",
+        moon: "🌘 1%", moonDetail: `${l("moon")}: 1% (${l("moon_rise")} 07:12)`, moonX: 520, moonY: 115,
+        sunset: `19:11 ${l("sunset")}`, sunrise: `07:03 ${l("sunrise")}`, coreWindow: "20:29 – 05:46",
+        twilightEvening: `19:11 (${l("dusk")})`, twilightNight: `20:29 - 05:46 ${l("dark_night")}`, twilightMorning: `07:03 (${l("dawn")})`,
         hourly: [
           { time: "20:00", clouds: 90, seeing: "1.9″", cx: 125, cy: 110 },
           { time: "22:00", clouds: 88, seeing: "1.8″", cx: 220, cy: 60 },
@@ -158,16 +177,16 @@ class AstroWeatherCard extends HTMLElement {
         ]
       },
       {
-        name: "Samstag", fullDate: "Samstag, 11. Oktober",
-        verdict: "Neumond, aber 99% Wolken", color: "amber", score: 20,
-        desc: "Perfekter Neumondhimmel ohne Mondlicht, aber leider dichte Wolkendecke.",
-        clouds: 99, cloudLow: 90, cloudMid: 70, cloudHigh: 40, cloudStatus: "Bedeckt",
-        dew: 94, dewpoint: 6.2, dewStatus: "Feucht",
-        wind: 7.2, windStatus: "Ruhig", windNote: "Stativ stabil",
-        seeing: 1.65, seeingStatus: "Gut", seeingNote: "Luft ruhig",
-        moon: "🌑 Neumond", moonDetail: "Neumond (Ganze Nacht dunkel)", moonX: 330, moonY: 35,
-        sunset: "19:08 Untergang", sunrise: "07:05 Aufgang", coreWindow: "20:27 – 05:48 Uhr",
-        twilightEvening: "19:08 (Einnorden)", twilightNight: "20:27 bis 05:48 Dunkle Nacht", twilightMorning: "07:05 (Dämmerung)",
+        name: l("days.sat"), fullDate: lang === "de" ? "Samstag, 11. Oktober" : "Saturday, Oct 11",
+        verdict: l("verdicts.new_moon_cloudy"), color: "amber", score: 20,
+        desc: l("verdicts.new_moon_cloudy_desc"),
+        clouds: 99, cloudLow: 90, cloudMid: 70, cloudHigh: 40, cloudStatus: lang === "de" ? "Bedeckt" : "Overcast",
+        dew: 94, dewpoint: 6.2, dewStatus: l("dew_risk"),
+        wind: 7.2, windStatus: l("calm"), windNote: l("no_shaking"),
+        seeing: 1.65, seeingStatus: l("sharp"), seeingNote: l("steady"),
+        moon: `🌑 ${l("new_moon")}`, moonDetail: `${l("new_moon")}`, moonX: 330, moonY: 35,
+        sunset: `19:08 ${l("sunset")}`, sunrise: `07:05 ${l("sunrise")}`, coreWindow: "20:27 – 05:48",
+        twilightEvening: `19:08 (${l("dusk")})`, twilightNight: `20:27 - 05:48 ${l("dark_night")}`, twilightMorning: `07:05 (${l("dawn")})`,
         hourly: [
           { time: "20:00", clouds: 100, seeing: "1.7″", cx: 125, cy: 110 },
           { time: "22:00", clouds: 99, seeing: "1.6″", cx: 220, cy: 60 },
@@ -178,16 +197,16 @@ class AstroWeatherCard extends HTMLElement {
         ]
       },
       {
-        name: "Sonntag", fullDate: "Sonntag, 12. Oktober",
-        verdict: "Wolkenlücken ab 23 Uhr", color: "amber", score: 48,
-        desc: "Aufklarender Himmel vor Mitternacht. Gutes Fenster für Deep-Sky und Planeten.",
-        clouds: 65, cloudLow: 50, cloudMid: 25, cloudHigh: 15, cloudStatus: "Lücken",
-        dew: 86, dewpoint: 5.1, dewStatus: "Mäßig feucht",
-        wind: 5.4, windStatus: "Windstill", windNote: "Sehr stabil",
-        seeing: 1.45, seeingStatus: "Scharf", seeingNote: "Gute Details",
-        moon: "🌒 3%", moonDetail: "Mond: 3% (Untergang 20:15)", moonX: 200, moonY: 70,
-        sunset: "19:06 Untergang", sunrise: "07:07 Aufgang", coreWindow: "20:25 – 05:50 Uhr",
-        twilightEvening: "19:06 (Einnorden)", twilightNight: "20:25 bis 05:50 Dunkle Nacht", twilightMorning: "07:07 (Dämmerung)",
+        name: l("days.sun"), fullDate: lang === "de" ? "Sonntag, 12. Oktober" : "Sunday, Oct 12",
+        verdict: l("verdicts.gaps"), color: "amber", score: 48,
+        desc: l("verdicts.gaps_desc"),
+        clouds: 65, cloudLow: 50, cloudMid: 25, cloudHigh: 15, cloudStatus: lang === "de" ? "Lücken" : "Cloud Gaps",
+        dew: 86, dewpoint: 5.1, dewStatus: l("dew_risk"),
+        wind: 5.4, windStatus: l("windstill"), windNote: l("no_shaking"),
+        seeing: 1.45, seeingStatus: l("sharp"), seeingNote: l("sharp_details"),
+        moon: "🌒 3%", moonDetail: `${l("moon")}: 3% (${l("moon_set")} 20:15)`, moonX: 200, moonY: 70,
+        sunset: `19:06 ${l("sunset")}`, sunrise: `07:07 ${l("sunrise")}`, coreWindow: "20:25 – 05:50",
+        twilightEvening: `19:06 (${l("dusk")})`, twilightNight: `20:25 - 05:50 ${l("dark_night")}`, twilightMorning: `07:07 (${l("dawn")})`,
         hourly: [
           { time: "20:00", clouds: 75, seeing: "1.6″", cx: 125, cy: 110 },
           { time: "22:00", clouds: 60, seeing: "1.5″", cx: 220, cy: 60 },
@@ -198,16 +217,16 @@ class AstroWeatherCard extends HTMLElement {
         ]
       },
       {
-        name: "Montag", fullDate: "Montag, 13. Oktober",
-        verdict: "Beste Chance der Woche!", color: "emerald", score: 55,
-        desc: "Trockene Kaltluft, ruhige Atmosphäre und kaum Mondlicht. Klare Sicht auf Jupiter und M31.",
-        clouds: 45, cloudLow: 20, cloudMid: 15, cloudHigh: 10, cloudStatus: "Teils klar",
-        dew: 78, dewpoint: 3.8, dewStatus: "Gut (Heizband bereit)",
-        wind: 4.2, windStatus: "Ruhig", windNote: "Optimal für Astrofotografie",
-        seeing: 1.25, seeingStatus: "Sehr ruhig", seeingNote: "Exzellentes Seeing",
-        moon: "🌒 8%", moonDetail: "Mond: 8% (Untergang 21:05)", moonX: 240, moonY: 55,
-        sunset: "19:04 Untergang", sunrise: "07:09 Aufgang", coreWindow: "20:23 – 05:52 Uhr",
-        twilightEvening: "19:04 (Einnorden)", twilightNight: "20:23 bis 05:52 Dunkle Nacht", twilightMorning: "07:09 (Dämmerung)",
+        name: l("days.mon"), fullDate: lang === "de" ? "Montag, 13. Oktober" : "Monday, Oct 13",
+        verdict: l("verdicts.best_chance"), color: "emerald", score: 55,
+        desc: l("verdicts.best_chance_desc"),
+        clouds: 45, cloudLow: 20, cloudMid: 15, cloudHigh: 10, cloudStatus: lang === "de" ? "Teils klar" : "Partly Clear",
+        dew: 78, dewpoint: 3.8, dewStatus: l("dew_heater"),
+        wind: 4.2, windStatus: l("calm"), windNote: l("no_shaking"),
+        seeing: 1.25, seeingStatus: l("sharp"), seeingNote: l("steady"),
+        moon: "🌒 8%", moonDetail: `${l("moon")}: 8% (${l("moon_set")} 21:05)`, moonX: 240, moonY: 55,
+        sunset: `19:04 ${l("sunset")}`, sunrise: `07:09 ${l("sunrise")}`, coreWindow: "20:23 – 05:52",
+        twilightEvening: `19:04 (${l("dusk")})`, twilightNight: `20:23 - 05:52 ${l("dark_night")}`, twilightMorning: `07:09 (${l("dawn")})`,
         hourly: [
           { time: "20:00", clouds: 55, seeing: "1.4″", cx: 125, cy: 110 },
           { time: "22:00", clouds: 40, seeing: "1.3″", cx: 220, cy: 60 },
@@ -267,13 +286,13 @@ class AstroWeatherCard extends HTMLElement {
     this._daysData = this._getForecastData();
     
     // Standort-Label ermitteln (aus Config oder Zone Home)
-    let locationLabel = this._config.title || "Astro-Wetter";
+    let locationLabel = this._config.title || this.l("title_default");
     let coordLabel = "";
     if (this._hass && this._hass.config) {
       const lat = this._hass.config.latitude ? this._hass.config.latitude.toFixed(2) + "° N" : "";
       const lon = this._hass.config.longitude ? this._hass.config.longitude.toFixed(2) + "° O" : "";
       if (lat && lon) coordLabel = `${lat} • ${lon}`;
-      if (this._config.title === "Astro-Wetter" && this._hass.config.location_name) {
+      if (!this._config.title && this._hass.config.location_name) {
         locationLabel = this._hass.config.location_name.toUpperCase();
       }
     }
@@ -884,7 +903,7 @@ class AstroWeatherCard extends HTMLElement {
                   <span>LIVE</span>
                 </div>
               </div>
-              <span style="font-size: 10px; color: #94a3b8;">Astro-Wetter & Beobachtungsfenster</span>
+              <span style="font-size: 10px; color: #94a3b8;">${this.l("sub_title")}</span>
             </div>
           </div>
 
@@ -932,11 +951,11 @@ class AstroWeatherCard extends HTMLElement {
             <div class="panel dome-box">
               <div class="dome-header">
                 <div>
-                  <h3 class="dome-title">Himmelskuppel</h3>
-                  <p class="dome-sub">West (Abend) ➔ Zenit ➔ Ost (Morgen)</p>
+                  <h3 class="dome-title">${this.l("sky_dome")}</h3>
+                  <p class="dome-sub">${this.l("sky_dome_sub")}</p>
                 </div>
                 <div style="text-align: right;">
-                  <span style="font-size: 9px; text-transform: uppercase; font-weight: 700; color: #94a3b8; display: block;">Dunkle Nacht</span>
+                  <span style="font-size: 9px; text-transform: uppercase; font-weight: 700; color: #94a3b8; display: block;">${this.l("dark_night")}</span>
                   <span id="domeCoreTimeBadge" class="dome-window">20:36 – 05:40 Uhr</span>
                 </div>
               </div>
@@ -989,7 +1008,7 @@ class AstroWeatherCard extends HTMLElement {
                   <text x="630" y="140" fill="#64748b" font-size="9" font-weight="700" text-anchor="end">OST</text>
 
                   <!-- Zenit -->
-                  <text x="330" y="16" fill="#818cf8" font-size="9" font-weight="700" text-anchor="middle">Zenit / Mitternacht</text>
+                  <text x="330" y="16" fill="#818cf8" font-size="9" font-weight="700" text-anchor="middle">${this.l("zenith_midnight")}</text>
 
                   <!-- Sonne Auf/Untergang -->
                   <circle cx="70" cy="145" r="5" fill="#ea580c"/>
@@ -1036,24 +1055,24 @@ class AstroWeatherCard extends HTMLElement {
             <!-- SICHTBARE ZIELE HEUTE -->
             <div class="panel targets-box">
               <div style="display: flex; justify-content: space-between; align-items: center;">
-                <h4 style="font-size: 11px; font-weight: 800; text-transform: uppercase; color: #e2e8f0; margin: 0;">Sichtbare Ziele heute</h4>
+                <h4 style="font-size: 11px; font-weight: 800; text-transform: uppercase; color: #e2e8f0; margin: 0;">${this.l("targets_tonight")}</h4>
                 <span style="font-size: 10px; color: #94a3b8; font-family: monospace;">Oktober</span>
               </div>
               <div class="targets-grid">
                 <div class="target-item">
                   <span class="target-name" style="color: #fbbf24;">🪐 Saturn</span>
                   <span class="target-time">20:00 – 01:30</span>
-                  <span class="target-sub">Ringkante</span>
+                  <span class="target-sub">${this.l("ring_edge")}</span>
                 </div>
                 <div class="target-item">
                   <span class="target-name" style="color: #38bdf8;">⚪ Jupiter</span>
                   <span class="target-time">Ab 22:45</span>
-                  <span class="target-sub">4 Galilei-Monde</span>
+                  <span class="target-sub">${this.l("four_moons")}</span>
                 </div>
                 <div class="target-item">
                   <span class="target-name" style="color: #a5b4fc;">🌌 M31</span>
                   <span class="target-time">Zenit 23:15</span>
-                  <span class="target-sub">Andromeda Galaxie</span>
+                  <span class="target-sub">${this.l("andromeda_galaxy")}</span>
                 </div>
               </div>
             </div>
@@ -1069,7 +1088,7 @@ class AstroWeatherCard extends HTMLElement {
               <!-- BEWÖLKUNG -->
               <div class="panel metric-card">
                 <div class="metric-header">
-                  <span class="metric-label">Bewölkung</span>
+                  <span class="metric-label">${this.l("cloud_cover")}</span>
                   <span id="cardCloudBadge" class="metric-badge badge-red">69%</span>
                 </div>
                 <div>
@@ -1092,7 +1111,7 @@ class AstroWeatherCard extends HTMLElement {
               <!-- FEUCHTE & TAU -->
               <div class="panel metric-card">
                 <div class="metric-header">
-                  <span class="metric-label">Feuchte / Tau</span>
+                  <span class="metric-label">${this.l("humidity_dew")}</span>
                   <span id="cardDewBadge" class="metric-badge badge-red">98%</span>
                 </div>
                 <div>
@@ -1113,7 +1132,7 @@ class AstroWeatherCard extends HTMLElement {
               <!-- WIND -->
               <div class="panel metric-card">
                 <div class="metric-header">
-                  <span class="metric-label">Wind (Stativ)</span>
+                  <span class="metric-label">${this.l("wind_mount")}</span>
                   <span id="cardWindBadge" class="metric-badge badge-green">Ruhig</span>
                 </div>
                 <div>
@@ -1137,7 +1156,7 @@ class AstroWeatherCard extends HTMLElement {
               <div class="panel metric-card">
                 <div class="metric-header">
                   <div style="display: flex; align-items: center;">
-                    <span class="metric-label">Seeing</span>
+                    <span class="metric-label">${this.l("seeing")}</span>
                     <button class="help-btn" id="btnSeeingHelp" title="Was ist Seeing?">?</button>
                   </div>
                   <span id="cardSeeingBadge" class="metric-badge badge-green">Scharf</span>
@@ -1162,15 +1181,15 @@ class AstroWeatherCard extends HTMLElement {
                 <div class="seeing-popover" id="seeingPopover">
                   <div>
                     <div style="display: flex; justify-content: space-between; align-items: center; color: #a5b4fc; font-size: 11px; font-weight: 700;">
-                      <span>Was bedeutet Seeing?</span>
+                      <span>${this.l("what_is_seeing")}</span>
                       <button id="btnCloseSeeing" style="background:none; border:none; color:#94a3b8; cursor:pointer;">✕</button>
                     </div>
                     <p style="font-size: 10px; color: #cbd5e1; margin-top: 6px; line-height: 1.4;">
-                      Misst das <strong>Luftflimmern</strong> in Bogensekunden (″). Je kleiner der Wert (&lt; 1,8″), desto ruhiger die Atmosphäre und schärfer das Bild im Teleskop!
+                      ${this.l("seeing_explanation")}
                     </p>
                   </div>
                   <button id="btnAckSeeing" style="background: rgba(99, 102, 241, 0.4); border: 1px solid rgba(99, 102, 241, 0.6); color: #e0e7ff; font-size: 10px; font-weight: 700; border-radius: 6px; padding: 4px; cursor: pointer;">
-                    Verstanden
+                    ${this.l("understood")}
                   </button>
                 </div>
               </div>
@@ -1181,8 +1200,8 @@ class AstroWeatherCard extends HTMLElement {
             <div class="panel hourly-box">
               <div class="hourly-header">
                 <div>
-                  <h4 style="font-size: 11px; font-weight: 800; text-transform: uppercase; color: #e2e8f0; margin: 0;">Stündlicher Verlauf</h4>
-                  <span style="font-size: 9px; color: #94a3b8;">Klicke eine Stunde für Fokus in der Kuppel</span>
+                  <h4 style="font-size: 11px; font-weight: 800; text-transform: uppercase; color: #e2e8f0; margin: 0;">${this.l("hourly_forecast")}</h4>
+                  <span style="font-size: 9px; color: #94a3b8;">${this.l("hourly_sub")}</span>
                 </div>
                 <span id="selectedHourBadge" style="font-size: 10px; font-family: monospace; color: #a5b4fc; background: rgba(30, 27, 75, 0.8); border: 1px solid rgba(99, 102, 241, 0.4); padding: 2px 8px; border-radius: 6px;">
                   Fokus: 00:00 Uhr
@@ -1199,8 +1218,8 @@ class AstroWeatherCard extends HTMLElement {
           <div class="col">
             <div class="panel forecast-box">
               <div class="forecast-header">
-                <h3 style="font-size: 11px; font-weight: 800; text-transform: uppercase; color: #e2e8f0; margin: 0;">7-Tage Vorschau</h3>
-                <span style="font-size: 9px; color: #94a3b8;">Klick zum Wechseln</span>
+                <h3 style="font-size: 11px; font-weight: 800; text-transform: uppercase; color: #e2e8f0; margin: 0;">${this.l("forecast_7day")}</h3>
+                <span style="font-size: 9px; color: #94a3b8;">${this.l("click_to_switch")}</span>
               </div>
 
               <div class="forecast-list" id="forecastContainer">
@@ -1209,7 +1228,7 @@ class AstroWeatherCard extends HTMLElement {
 
               <!-- NEUMOND HINWEIS -->
               <div class="notice-box">
-                <strong>Hinweis Neumond (Sa):</strong> Ideale Mondnacht, aber 99% Regenfront. Beste Beobachtungschancen ab <strong>Sonntag/Montag</strong>!
+                <strong>${this.l("new_moon_notice_title")}</strong> ${this.l("new_moon_notice_text")}
               </div>
             </div>
           </div>
