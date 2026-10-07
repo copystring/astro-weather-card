@@ -240,43 +240,164 @@ class AstroWeatherCard extends HTMLElement {
   }
 
   _updateFromHass() {
-    if (!this._hass) return;
+    if (!this._hass || !this._hass.states) return;
 
-    // Optional: Sensor-Hydration aus echten Home Assistant Entitäten
     const days = this._daysData || this._getForecastData();
     const today = days[0];
 
     const getVal = (entityId) => {
-      if (!entityId || !this._hass?.states || !this._hass.states[entityId]) return null;
+      if (!entityId || !this._hass.states[entityId]) return null;
       return this._hass.states[entityId].state;
     };
 
-    const seeingVal = getVal(this._config.seeing_entity || 'sensor.astroweather_backyard_seeing');
-    if (seeingVal && !isNaN(parseFloat(seeingVal))) {
-      today.seeing = parseFloat(seeingVal).toFixed(2).replace('.', ',');
-    }
+    // 1. Weather Entity Fallback / Auto-Detection
+    const weatherEntityId = this._config.weather_entity || 
+      (this._hass.states['weather.astroweather_backyard'] ? 'weather.astroweather_backyard' : 
+      (this._hass.states['weather.astroweather'] ? 'weather.astroweather' : null));
+    const weatherAttr = weatherEntityId && this._hass.states[weatherEntityId]?.attributes ? this._hass.states[weatherEntityId].attributes : {};
 
-    const windVal = getVal(this._config.wind_entity || 'sensor.astroweather_backyard_10m_wind_speed');
-    if (windVal && !isNaN(parseFloat(windVal))) {
-      today.wind = parseFloat(windVal).toFixed(1).replace('.', ',');
-    }
-
-    const humVal = getVal(this._config.humidity_entity || 'sensor.astroweather_backyard_2m_relative_humidity');
-    if (humVal && !isNaN(parseFloat(humVal))) {
-      today.dew = Math.round(parseFloat(humVal));
-    }
-
-    const dewVal = getVal(this._config.dewpoint_entity || 'sensor.astroweather_backyard_2m_dewpoint');
-    if (dewVal && !isNaN(parseFloat(dewVal))) {
-      today.dewpoint = parseFloat(dewVal).toFixed(1);
-    }
-
+    // 2. Score & Condition
+    let score = null;
     const condVal = getVal(this._config.condition_entity || 'sensor.astroweather_backyard_condition');
     if (condVal && !isNaN(parseFloat(condVal))) {
-      today.score = Math.round(parseFloat(condVal));
-      if (today.score >= 50) today.color = 'emerald';
-      else if (today.score >= 25) today.color = 'amber';
-      else today.color = 'red';
+      score = Math.round(parseFloat(condVal));
+    } else if (weatherAttr.condition_percentage !== undefined && !isNaN(parseFloat(weatherAttr.condition_percentage))) {
+      score = Math.round(parseFloat(weatherAttr.condition_percentage));
+    }
+
+    if (score !== null) {
+      today.score = score;
+      if (score >= 70) {
+        today.color = 'emerald';
+        today.verdict = this.l('verdicts.great_night');
+        today.desc = this.l('verdicts.great_night_desc');
+      } else if (score >= 45) {
+        today.color = 'emerald';
+        today.verdict = this.l('verdicts.good_conditions');
+        today.desc = this.l('verdicts.good_conditions_desc');
+      } else if (score >= 25) {
+        today.color = 'amber';
+        today.verdict = this.l('verdicts.fair_conditions');
+        today.desc = this.l('verdicts.fair_conditions_desc');
+      } else {
+        today.color = 'red';
+        today.verdict = this.l('verdicts.do_not_setup');
+        today.desc = this.l('verdicts.do_not_setup_desc');
+      }
+    }
+
+    // 3. Seeing
+    let seeing = null;
+    const seeingVal = getVal(this._config.seeing_entity || 'sensor.astroweather_backyard_seeing');
+    if (seeingVal && !isNaN(parseFloat(seeingVal))) {
+      seeing = parseFloat(seeingVal);
+    } else if (weatherAttr.seeing !== undefined && !isNaN(parseFloat(weatherAttr.seeing))) {
+      seeing = parseFloat(weatherAttr.seeing);
+    }
+    if (seeing !== null) {
+      today.seeing = seeing.toFixed(2).replace('.', ',');
+      if (seeing < 1.4) {
+        today.seeingStatus = this.l('sharp');
+        today.seeingNote = this.l('sharp_details');
+      } else if (seeing < 2.0) {
+        today.seeingStatus = this.l('steady');
+        today.seeingNote = this.l('steady');
+      } else {
+        today.seeingStatus = this.l('turbulent');
+        today.seeingNote = this.l('turbulent');
+      }
+    }
+
+    // 4. Wind
+    let wind = null;
+    const windVal = getVal(this._config.wind_entity || 'sensor.astroweather_backyard_10m_wind_speed');
+    if (windVal && !isNaN(parseFloat(windVal))) {
+      wind = parseFloat(windVal);
+    } else if (weatherAttr.wind_speed !== undefined && !isNaN(parseFloat(weatherAttr.wind_speed))) {
+      wind = parseFloat(weatherAttr.wind_speed);
+    }
+    if (wind !== null) {
+      today.wind = wind.toFixed(1).replace('.', ',');
+      if (wind < 8) {
+        today.windStatus = this.l('windstill');
+        today.windNote = this.l('no_shaking');
+      } else if (wind < 20) {
+        today.windStatus = this.l('moderate');
+        today.windNote = this._getLang() === 'de' ? 'Leichte Vibrationen' : 'Minor vibration';
+      } else {
+        today.windStatus = this.l('gusty');
+        today.windNote = this._getLang() === 'de' ? 'Sturmböen / Wackeln' : 'Gusty / Shaking';
+      }
+    }
+
+    // 5. Humidity & Dew Point
+    let hum = null;
+    const humVal = getVal(this._config.humidity_entity || 'sensor.astroweather_backyard_2m_relative_humidity');
+    if (humVal && !isNaN(parseFloat(humVal))) {
+      hum = Math.round(parseFloat(humVal));
+    } else if (weatherAttr.humidity !== undefined && !isNaN(parseFloat(weatherAttr.humidity))) {
+      hum = Math.round(parseFloat(weatherAttr.humidity));
+    }
+    if (hum !== null) {
+      today.dew = hum;
+      if (hum >= 90) today.dewStatus = this.l('dew_alert');
+      else if (hum >= 75) today.dewStatus = this.l('dew_heater');
+      else today.dewStatus = this.l('calm');
+    }
+
+    let dewpoint = null;
+    const dewVal = getVal(this._config.dewpoint_entity || 'sensor.astroweather_backyard_2m_dewpoint');
+    if (dewVal && !isNaN(parseFloat(dewVal))) {
+      dewpoint = parseFloat(dewVal);
+    } else if (weatherAttr.dewpoint !== undefined && !isNaN(parseFloat(weatherAttr.dewpoint))) {
+      dewpoint = parseFloat(weatherAttr.dewpoint);
+    }
+    if (dewpoint !== null) {
+      today.dewpoint = dewpoint.toFixed(1);
+    }
+
+    // 6. Clouds
+    let clouds = null;
+    const cloudVal = getVal(this._config.cloud_entity || 'sensor.astroweather_backyard_cloud_cover');
+    if (cloudVal && !isNaN(parseFloat(cloudVal))) {
+      clouds = Math.round(parseFloat(cloudVal));
+    } else if (weatherAttr.cloudcover_percentage !== undefined && !isNaN(parseFloat(weatherAttr.cloudcover_percentage))) {
+      clouds = Math.round(parseFloat(weatherAttr.cloudcover_percentage));
+    }
+    if (clouds !== null) {
+      today.clouds = clouds;
+      if (clouds <= 10) today.cloudStatus = this._getLang() === 'de' ? 'Klarer Himmel' : 'Clear Sky';
+      else if (clouds <= 35) today.cloudStatus = this._getLang() === 'de' ? 'Teils klar' : 'Partly Clear';
+      else if (clouds <= 70) today.cloudStatus = this._getLang() === 'de' ? 'Bewölkt' : 'Mostly Cloudy';
+      else today.cloudStatus = this._getLang() === 'de' ? 'Bedeckt' : 'Overcast';
+
+      // Update hourly preview for today if clouds are clear
+      if (today.hourly) {
+        today.hourly.forEach((h, idx) => {
+          h.clouds = Math.max(0, Math.min(100, Math.round(clouds + (idx % 2 === 0 ? 5 : 0))));
+        });
+      }
+    }
+
+    const cloudLowVal = getVal(this._config.cloud_low_entity || 'sensor.astroweather_backyard_clouds_area_low');
+    if (cloudLowVal && !isNaN(parseFloat(cloudLowVal))) {
+      today.cloudLow = Math.round(parseFloat(cloudLowVal));
+    } else if (weatherAttr.cloud_area_fraction_low !== undefined) {
+      today.cloudLow = Math.round(parseFloat(weatherAttr.cloud_area_fraction_low));
+    }
+
+    const cloudMidVal = getVal(this._config.cloud_mid_entity || 'sensor.astroweather_backyard_clouds_area_medium');
+    if (cloudMidVal && !isNaN(parseFloat(cloudMidVal))) {
+      today.cloudMid = Math.round(parseFloat(cloudMidVal));
+    } else if (weatherAttr.cloud_area_fraction_medium !== undefined) {
+      today.cloudMid = Math.round(parseFloat(weatherAttr.cloud_area_fraction_medium));
+    }
+
+    const cloudHighVal = getVal(this._config.cloud_high_entity || 'sensor.astroweather_backyard_clouds_area_high');
+    if (cloudHighVal && !isNaN(parseFloat(cloudHighVal))) {
+      today.cloudHigh = Math.round(parseFloat(cloudHighVal));
+    } else if (weatherAttr.cloud_area_fraction_high !== undefined) {
+      today.cloudHigh = Math.round(parseFloat(weatherAttr.cloud_area_fraction_high));
     }
 
     this._renderDynamicContent();
