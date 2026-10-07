@@ -1,0 +1,30 @@
+{
+  "name": "astro-weather-card",
+  "version": "1.0.0",
+  "description": "Premium Astronomical Weather & Observation Planning Card for Home Assistant",
+  "main": "dist/astro-weather-card.js",
+  "module": "dist/astro-weather-card.js",
+  "scripts": {
+    "build": "rollup -c",
+    "watch": "rollup -c -w"
+  },
+  "keywords": [
+    "home-assistant",
+    "homeassistant",
+    "hacs",
+    "lovelace",
+    "custom-card",
+    "astronomy",
+    "weather",
+    "astroweather",
+    "telescope",
+    "sky"
+  ],
+  "author": "copystring",
+  "license": "MIT",
+  "devDependencies": {
+    "@rollup/plugin-node-resolve": "^15.2.3",
+    "@rollup/plugin-terser": "^0.4.4",
+    "rollup": "^4.9.6"
+  }
+}
