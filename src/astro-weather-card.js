@@ -1211,22 +1211,22 @@ class AstroWeatherCard extends HTMLElement {
               <div class="panel metric-card">
                 <div class="metric-header">
                   <span class="metric-label">${this.l("cloud_cover")}</span>
-                  <span id="cardCloudBadge" class="metric-badge badge-red">69%</span>
+                  <span id="cardCloudBadge" class="metric-badge badge-green">0%</span>
                 </div>
                 <div>
                   <div class="metric-val-wrap">
-                    <span id="cardCloudVal" class="metric-val">69</span>
+                    <span id="cardCloudVal" class="metric-val">0</span>
                     <span class="metric-unit">%</span>
-                    <span id="cardCloudStatus" class="metric-status" style="color: #f87171;">Hochnebel</span>
+                    <span id="cardCloudStatus" class="metric-status">Klar</span>
                   </div>
                   <div class="metric-bar-bg">
-                    <div id="cardCloudBar" class="metric-bar-fill" style="width: 69%; background: #ef4444;"></div>
+                    <div id="cardCloudBar" class="metric-bar-fill" style="width: 0%;"></div>
                   </div>
                 </div>
                 <div class="metric-footer" style="display: flex; justify-content: space-between;">
-                  <span>T: <strong id="cloudLowVal" style="color: #f87171;">85%</strong></span>
-                  <span>M: <strong id="cloudMidVal" style="color: #cbd5e1;">15%</strong></span>
-                  <span>H: <strong id="cloudHighVal" style="color: #34d399;">0%</strong></span>
+                  <span>T: <strong id="cloudLowVal">0%</strong></span>
+                  <span>M: <strong id="cloudMidVal">0%</strong></span>
+                  <span>H: <strong id="cloudHighVal">0%</strong></span>
                 </div>
               </div>
 
@@ -1234,20 +1234,20 @@ class AstroWeatherCard extends HTMLElement {
               <div class="panel metric-card">
                 <div class="metric-header">
                   <span class="metric-label">${this.l("humidity_dew")}</span>
-                  <span id="cardDewBadge" class="metric-badge badge-red">98%</span>
+                  <span id="cardDewBadge" class="metric-badge badge-green">50%</span>
                 </div>
                 <div>
                   <div class="metric-val-wrap">
-                    <span id="cardDewVal" class="metric-val">98</span>
+                    <span id="cardDewVal" class="metric-val">50</span>
                     <span class="metric-unit">%</span>
-                    <span id="cardDewStatus" class="metric-status" style="color: #f87171;">Tau-Alarm</span>
+                    <span id="cardDewStatus" class="metric-status">Optimal</span>
                   </div>
                   <div class="metric-bar-bg">
-                    <div id="cardDewBar" class="metric-bar-fill" style="width: 98%; background: #ef4444;"></div>
+                    <div id="cardDewBar" class="metric-bar-fill" style="width: 50%;"></div>
                   </div>
                 </div>
                 <div class="metric-footer">
-                  ${this.l("dewpoint")}: <strong id="dewpointVal" style="color: #e2e8f0;">7.5 °C</strong> (${this.l("dew_heater")})
+                  ${this.l("dewpoint")}: <strong id="dewpointVal" style="color: #e2e8f0;">7.5 °C</strong> <span id="dewNotice" style="font-weight: 600;"></span>
                 </div>
               </div>
 
@@ -1467,27 +1467,131 @@ class AstroWeatherCard extends HTMLElement {
     root.getElementById('twilightMorningTime').innerText = d.twilightMorning.split(' ')[0];
 
     // Metriken
+    // 1. BEWÖLKUNG
     root.getElementById('cardCloudVal').innerText = d.clouds;
-    root.getElementById('cardCloudBar').style.width = `${d.clouds}%`;
-    root.getElementById('cardCloudBadge').innerText = `${d.clouds}%`;
-    root.getElementById('cardCloudStatus').innerText = d.cloudStatus;
-    root.getElementById('cloudLowVal').innerText = `${d.cloudLow}%`;
-    root.getElementById('cloudMidVal').innerText = `${d.cloudMid}%`;
-    root.getElementById('cloudHighVal').innerText = `${d.cloudHigh}%`;
+    const cloudValEl = root.getElementById('cardCloudVal');
+    const cloudBar = root.getElementById('cardCloudBar');
+    const cloudBadge = root.getElementById('cardCloudBadge');
+    const cloudStatus = root.getElementById('cardCloudStatus');
 
+    cloudBar.style.width = `${d.clouds}%`;
+    cloudBadge.innerText = `${d.clouds}%`;
+    cloudStatus.innerText = d.cloudStatus;
+
+    if (d.clouds <= 20) {
+      cloudBadge.className = 'metric-badge badge-green';
+      cloudStatus.style.color = '#34d399';
+      cloudBar.style.background = '#10b981';
+      cloudValEl.style.color = '#34d399';
+    } else if (d.clouds <= 50) {
+      cloudBadge.className = 'metric-badge badge-amber';
+      cloudStatus.style.color = '#fbbf24';
+      cloudBar.style.background = '#f59e0b';
+      cloudValEl.style.color = '#fbbf24';
+    } else {
+      cloudBadge.className = 'metric-badge badge-red';
+      cloudStatus.style.color = '#f87171';
+      cloudBar.style.background = '#ef4444';
+      cloudValEl.style.color = '#f87171';
+    }
+
+    const cLowEl = root.getElementById('cloudLowVal');
+    const cMidEl = root.getElementById('cloudMidVal');
+    const cHighEl = root.getElementById('cloudHighVal');
+    cLowEl.innerText = `${d.cloudLow}%`;
+    cMidEl.innerText = `${d.cloudMid}%`;
+    cHighEl.innerText = `${d.cloudHigh}%`;
+    cLowEl.style.color = d.cloudLow <= 20 ? '#34d399' : (d.cloudLow <= 50 ? '#fbbf24' : '#f87171');
+    cMidEl.style.color = d.cloudMid <= 20 ? '#34d399' : (d.cloudMid <= 50 ? '#fbbf24' : '#f87171');
+    cHighEl.style.color = d.cloudHigh <= 20 ? '#34d399' : (d.cloudHigh <= 50 ? '#fbbf24' : '#f87171');
+
+    // 2. FEUCHTE & TAU
     root.getElementById('cardDewVal').innerText = d.dew;
-    root.getElementById('cardDewBar').style.width = `${d.dew}%`;
-    root.getElementById('cardDewBadge').innerText = `${d.dew}%`;
-    root.getElementById('cardDewStatus').innerText = d.dewStatus;
+    const dewValEl = root.getElementById('cardDewVal');
+    const dewBar = root.getElementById('cardDewBar');
+    const dewBadge = root.getElementById('cardDewBadge');
+    const dewStatus = root.getElementById('cardDewStatus');
+    const dewNotice = root.getElementById('dewNotice');
+
+    dewBar.style.width = `${d.dew}%`;
+    dewBadge.innerText = `${d.dew}%`;
+    dewStatus.innerText = d.dewStatus;
     root.getElementById('dewpointVal').innerText = `${d.dewpoint} °C`;
 
+    if (d.dew >= 85) {
+      dewBadge.className = 'metric-badge badge-red';
+      dewStatus.style.color = '#f87171';
+      dewBar.style.background = '#ef4444';
+      dewValEl.style.color = '#f87171';
+      if (dewNotice) {
+        dewNotice.innerText = `(${this.l("dew_alert")})`;
+        dewNotice.style.color = '#f87171';
+      }
+    } else if (d.dew >= 70) {
+      dewBadge.className = 'metric-badge badge-amber';
+      dewStatus.style.color = '#fbbf24';
+      dewBar.style.background = '#f59e0b';
+      dewValEl.style.color = '#fbbf24';
+      if (dewNotice) {
+        dewNotice.innerText = `(${this.l("dew_risk")})`;
+        dewNotice.style.color = '#fbbf24';
+      }
+    } else {
+      dewBadge.className = 'metric-badge badge-green';
+      dewStatus.style.color = '#34d399';
+      dewBar.style.background = '#10b981';
+      dewValEl.style.color = '#34d399';
+      if (dewNotice) {
+        dewNotice.innerText = `(${this.l("dew_dry")})`;
+        dewNotice.style.color = '#34d399';
+      }
+    }
+
+    // 3. WIND
     root.getElementById('cardWindVal').innerText = d.wind;
-    root.getElementById('cardWindStatus').innerText = d.windStatus;
+    const windValEl = root.getElementById('cardWindVal');
+    const windStatus = root.getElementById('cardWindStatus');
+    const windBadge = root.getElementById('cardWindBadge');
+    windStatus.innerText = d.windStatus;
     root.getElementById('cardWindNote').innerText = d.windNote;
 
+    const wNum = parseFloat(String(d.wind).replace(',', '.'));
+    if (wNum < 10) {
+      if (windBadge) windBadge.className = 'metric-badge badge-green';
+      windStatus.style.color = '#34d399';
+      windValEl.style.color = '#34d399';
+    } else if (wNum < 25) {
+      if (windBadge) windBadge.className = 'metric-badge badge-amber';
+      windStatus.style.color = '#fbbf24';
+      windValEl.style.color = '#fbbf24';
+    } else {
+      if (windBadge) windBadge.className = 'metric-badge badge-red';
+      windStatus.style.color = '#f87171';
+      windValEl.style.color = '#f87171';
+    }
+
+    // 4. SEEING
     root.getElementById('cardSeeingVal').innerText = d.seeing;
-    root.getElementById('cardSeeingStatus').innerText = d.seeingStatus;
+    const seeingValEl = root.getElementById('cardSeeingVal');
+    const seeingStatus = root.getElementById('cardSeeingStatus');
+    const seeingBadge = root.getElementById('cardSeeingBadge');
+    seeingStatus.innerText = d.seeingStatus;
     root.getElementById('cardSeeingNote').innerText = d.seeingNote;
+
+    const sNum = parseFloat(String(d.seeing).replace(',', '.'));
+    if (sNum < 1.5) {
+      if (seeingBadge) seeingBadge.className = 'metric-badge badge-green';
+      seeingStatus.style.color = '#34d399';
+      seeingValEl.style.color = '#34d399';
+    } else if (sNum < 2.0) {
+      if (seeingBadge) seeingBadge.className = 'metric-badge badge-green';
+      seeingStatus.style.color = '#38bdf8';
+      seeingValEl.style.color = '#38bdf8';
+    } else {
+      if (seeingBadge) seeingBadge.className = 'metric-badge badge-amber';
+      seeingStatus.style.color = '#fbbf24';
+      seeingValEl.style.color = '#fbbf24';
+    }
 
     this._renderHourlyGrid();
     this._renderForecastList();
