@@ -22,6 +22,18 @@
 
 ---
 
+> [!IMPORTANT]
+> ### ⚠️ Required Dependency: AstroWeather Integration
+> This Lovelace card visualizes astronomical weather telemetry and strictly requires the free **[AstroWeather Integration](https://github.com/mawinkler/astroweather)** (by mawinkler) in Home Assistant.
+>
+> [![Install AstroWeather via HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=mawinkler&repository=astroweather&category=integration)
+>
+> 1. Install **AstroWeather** via HACS.
+> 2. Add AstroWeather under **Settings ➔ Devices & Services**.
+> 3. Astro Weather Card will **automatically detect** your AstroWeather entities with zero setup needed! If AstroWeather is not installed, the card displays a built-in setup assistant.
+
+---
+
 ## 🎯 Why Astro Weather Card?
 
 Standard weather apps and generic Lovelace cards are designed for everyday forecasts — not for astronomy. They tell you if it rains tomorrow, but they don't answer crucial observing questions:

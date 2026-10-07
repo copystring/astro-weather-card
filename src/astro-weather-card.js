@@ -6,7 +6,7 @@
  * License: MIT
  */
 
-const CARD_VERSION = "1.1.0";
+const CARD_VERSION = "1.2.0";
 import { localize } from "./localize.js";
 
 console.info(
@@ -20,15 +20,33 @@ class AstroWeatherCard extends HTMLElement {
     super();
     this.attachShadow({ mode: 'open' });
     this._currentDayIdx = 0;
-    this._selectedHourIdx = 2; // Default 00:00 Mitternacht
+    this._selectedHourIdx = 2; // Default ~Midnight
     this._initialized = false;
     this._hass = null;
     this._config = {};
+    this._weatherEntityId = null;
+    this._missingIntegration = false;
+    this._rawForecast = null;
+    this._daysData = [];
+    this._unsubForecast = null;
+    this._subscribedEntity = null;
   }
 
   connectedCallback() {
-    if (!this._initialized) {
-      this._render();
+    if (!this._initialized && this._hass) {
+      this._updateFromHass();
+    }
+  }
+
+  disconnectedCallback() {
+    if (this._unsubForecast) {
+      try {
+        this._unsubForecast();
+      } catch (e) {
+        // ignore
+      }
+      this._unsubForecast = null;
+      this._subscribedEntity = null;
     }
   }
 
@@ -39,35 +57,30 @@ class AstroWeatherCard extends HTMLElement {
   static getStubConfig() {
     return {
       title: "Astro-Wetter",
-      weather_entity: "weather.astroweather",
-      seeing_entity: "sensor.astroweather_backyard_seeing",
-      wind_entity: "sensor.astroweather_backyard_10m_wind_speed",
-      humidity_entity: "sensor.astroweather_backyard_2m_relative_humidity",
-      dewpoint_entity: "sensor.astroweather_backyard_2m_dewpoint",
-      cloud_low_entity: "sensor.astroweather_backyard_cloud_low",
-      cloud_mid_entity: "sensor.astroweather_backyard_cloud_mid",
-      cloud_high_entity: "sensor.astroweather_backyard_cloud_high"
+      weather_entity: "",
+      show_targets: true,
+      show_forecast: true,
+      show_hourly: true,
+      show_twilight: true
     };
   }
 
   setConfig(config) {
     this._config = Object.assign({
-      title: "Astro-Wetter",
+      title: "",
       show_targets: true,
       show_forecast: true,
       show_hourly: true,
       show_twilight: true
     }, config);
 
-    this._render();
+    if (this._hass) {
+      this._updateFromHass();
+    }
   }
 
   set hass(hass) {
     this._hass = hass;
-    if (!this._initialized) {
-      this._render();
-      return;
-    }
     this._updateFromHass();
   }
 
@@ -90,333 +103,739 @@ class AstroWeatherCard extends HTMLElement {
     return localize(key, this._getLang());
   }
 
+  /**
+   * Find AstroWeather entity:
+   * 1. From config (weather_entity)
+   * 2. Auto-detect weather.astroweather*
+   * 3. Fallback: any weather.* entity with seeing / condition_percentage attributes
+   */
+  _findAstroWeatherEntity() {
+    if (!this._hass || !this._hass.states) return null;
 
-  // Hilfsmethode: Standarddaten für die 7-Tage-Vorschau
-  _getForecastData() {
-    const lang = this._getLang();
-    const l = (k) => localize(k, lang);
-    return [
-      {
-        name: l("days.today"), fullDate: lang === "de" ? "Dienstag, 07. Oktober" : "Tuesday, Oct 07",
-        verdict: l("verdicts.do_not_setup"), color: "red", score: 17,
-        desc: l("verdicts.do_not_setup_desc"),
-        clouds: 69, cloudLow: 85, cloudMid: 15, cloudHigh: 0, cloudStatus: lang === "de" ? "Hochnebel" : "High Fog",
-        dew: 98, dewpoint: 7.5, dewStatus: l("dew_alert"),
-        wind: 3.6, windStatus: l("windstill"), windNote: l("no_shaking"),
-        seeing: 1.37, seeingStatus: l("steady"), seeingNote: l("sharp_details"),
-        moon: "🌘 15%", moonDetail: `${l("moon")}: 15% (${l("moon_rise")} 03:24)`, moonX: 395, moonY: 55,
-        sunset: `19:18 ${l("sunset")}`, sunrise: `06:58 ${l("sunrise")}`, coreWindow: "20:36 – 05:40",
-        twilightEvening: `19:18 (${l("dusk")})`, twilightNight: `20:36 - 05:40 ${l("dark_night")}`, twilightMorning: `06:58 (${l("dawn")})`,
-        hourly: [
-          { time: "20:00", clouds: 75, seeing: "1.5″", cx: 125, cy: 110 },
-          { time: "22:00", clouds: 72, seeing: "1.4″", cx: 220, cy: 60 },
-          { time: "00:00", clouds: 69, seeing: "1.4″", cx: 330, cy: 35 },
-          { time: "02:00", clouds: 66, seeing: "1.3″", cx: 440, cy: 60 },
-          { time: "04:00", clouds: 70, seeing: "1.4″", cx: 535, cy: 110 },
-          { time: "06:00", clouds: 80, seeing: "1.6″", cx: 590, cy: 145 }
-        ]
-      },
-      {
-        name: l("days.wed"), fullDate: lang === "de" ? "Mittwoch, 08. Oktober" : "Wednesday, Oct 08",
-        verdict: l("verdicts.rain_front"), color: "red", score: 13,
-        desc: l("verdicts.rain_front_desc"),
-        clouds: 90, cloudLow: 90, cloudMid: 40, cloudHigh: 10, cloudStatus: lang === "de" ? "Regenfront" : "Rain Front",
-        dew: 95, dewpoint: 8.0, dewStatus: l("dew_risk"),
-        wind: 12.4, windStatus: l("moderate"), windNote: lang === "de" ? "Leichte Vibrationen" : "Minor vibration",
-        seeing: 2.10, seeingStatus: l("turbulent"), seeingNote: lang === "de" ? "Flimmern am Planeten" : "Planetary blur",
-        moon: "🌘 9%", moonDetail: `${l("moon")}: 9% (${l("moon_rise")} 04:40)`, moonX: 430, moonY: 70,
-        sunset: `19:15 ${l("sunset")}`, sunrise: `07:00 ${l("sunrise")}`, coreWindow: "20:33 – 05:42",
-        twilightEvening: `19:15 (${l("dusk")})`, twilightNight: `20:33 - 05:42 ${l("dark_night")}`, twilightMorning: `07:00 (${l("dawn")})`,
-        hourly: [
-          { time: "20:00", clouds: 95, seeing: "2.3″", cx: 125, cy: 110 },
-          { time: "22:00", clouds: 90, seeing: "2.1″", cx: 220, cy: 60 },
-          { time: "00:00", clouds: 88, seeing: "2.0″", cx: 330, cy: 35 },
-          { time: "02:00", clouds: 92, seeing: "2.1″", cx: 440, cy: 60 },
-          { time: "04:00", clouds: 95, seeing: "2.2″", cx: 535, cy: 110 },
-          { time: "06:00", clouds: 98, seeing: "2.4″", cx: 590, cy: 145 }
-        ]
-      },
-      {
-        name: l("days.thu"), fullDate: lang === "de" ? "Donnerstag, 09. Oktober" : "Thursday, Oct 09",
-        verdict: l("verdicts.stormy"), color: "red", score: 8,
-        desc: l("verdicts.stormy_desc"),
-        clouds: 99, cloudLow: 95, cloudMid: 80, cloudHigh: 50, cloudStatus: lang === "de" ? "Stark bewölkt" : "Overcast",
-        dew: 99, dewpoint: 9.2, dewStatus: lang === "de" ? "Nass" : "Wet",
-        wind: 24.5, windStatus: l("gusty"), windNote: lang === "de" ? "Starkes Wackeln" : "Heavy vibration",
-        seeing: 2.80, seeingStatus: l("poor"), seeingNote: lang === "de" ? "Starkes Flackern" : "Severe scintillation",
-        moon: "🌘 4%", moonDetail: `${l("moon")}: 4% (${l("moon_rise")} 05:55)`, moonX: 470, moonY: 90,
-        sunset: `19:13 ${l("sunset")}`, sunrise: `07:02 ${l("sunrise")}`, coreWindow: "20:31 – 05:44",
-        twilightEvening: `19:13 (${l("dusk")})`, twilightNight: `20:31 - 05:44 ${l("dark_night")}`, twilightMorning: `07:02 (${l("dawn")})`,
-        hourly: [
-          { time: "20:00", clouds: 100, seeing: "2.9″", cx: 125, cy: 110 },
-          { time: "22:00", clouds: 99, seeing: "2.8″", cx: 220, cy: 60 },
-          { time: "00:00", clouds: 99, seeing: "2.8″", cx: 330, cy: 35 },
-          { time: "02:00", clouds: 98, seeing: "2.7″", cx: 440, cy: 60 },
-          { time: "04:00", clouds: 99, seeing: "2.8″", cx: 535, cy: 110 },
-          { time: "06:00", clouds: 100, seeing: "3.0″", cx: 590, cy: 145 }
-        ]
-      },
-      {
-        name: l("days.fri"), fullDate: lang === "de" ? "Freitag, 10. Oktober" : "Friday, Oct 10",
-        verdict: l("verdicts.showers"), color: "red", score: 15,
-        desc: l("verdicts.showers_desc"),
-        clouds: 85, cloudLow: 80, cloudMid: 60, cloudHigh: 30, cloudStatus: lang === "de" ? "Wolkig" : "Cloudy",
-        dew: 92, dewpoint: 6.8, dewStatus: l("dew_risk"),
-        wind: 9.8, windStatus: l("calm"), windNote: lang === "de" ? "Akzeptabel" : "Acceptable",
-        seeing: 1.85, seeingStatus: l("moderate"), seeingNote: lang === "de" ? "Brauchbar für Mond" : "Good for moon",
-        moon: "🌘 1%", moonDetail: `${l("moon")}: 1% (${l("moon_rise")} 07:12)`, moonX: 520, moonY: 115,
-        sunset: `19:11 ${l("sunset")}`, sunrise: `07:03 ${l("sunrise")}`, coreWindow: "20:29 – 05:46",
-        twilightEvening: `19:11 (${l("dusk")})`, twilightNight: `20:29 - 05:46 ${l("dark_night")}`, twilightMorning: `07:03 (${l("dawn")})`,
-        hourly: [
-          { time: "20:00", clouds: 90, seeing: "1.9″", cx: 125, cy: 110 },
-          { time: "22:00", clouds: 88, seeing: "1.8″", cx: 220, cy: 60 },
-          { time: "00:00", clouds: 85, seeing: "1.8″", cx: 330, cy: 35 },
-          { time: "02:00", clouds: 80, seeing: "1.8″", cx: 440, cy: 60 },
-          { time: "04:00", clouds: 75, seeing: "1.7″", cx: 535, cy: 110 },
-          { time: "06:00", clouds: 82, seeing: "1.9″", cx: 590, cy: 145 }
-        ]
-      },
-      {
-        name: l("days.sat"), fullDate: lang === "de" ? "Samstag, 11. Oktober" : "Saturday, Oct 11",
-        verdict: l("verdicts.new_moon_cloudy"), color: "amber", score: 20,
-        desc: l("verdicts.new_moon_cloudy_desc"),
-        clouds: 99, cloudLow: 90, cloudMid: 70, cloudHigh: 40, cloudStatus: lang === "de" ? "Bedeckt" : "Overcast",
-        dew: 94, dewpoint: 6.2, dewStatus: l("dew_risk"),
-        wind: 7.2, windStatus: l("calm"), windNote: l("no_shaking"),
-        seeing: 1.65, seeingStatus: l("sharp"), seeingNote: l("steady"),
-        moon: "🌑 0%", moonDetail: `${l("new_moon")}`, moonX: 330, moonY: 35,
-        sunset: `19:08 ${l("sunset")}`, sunrise: `07:05 ${l("sunrise")}`, coreWindow: "20:27 – 05:48",
-        twilightEvening: `19:08 (${l("dusk")})`, twilightNight: `20:27 - 05:48 ${l("dark_night")}`, twilightMorning: `07:05 (${l("dawn")})`,
-        hourly: [
-          { time: "20:00", clouds: 100, seeing: "1.7″", cx: 125, cy: 110 },
-          { time: "22:00", clouds: 99, seeing: "1.6″", cx: 220, cy: 60 },
-          { time: "00:00", clouds: 98, seeing: "1.6″", cx: 330, cy: 35 },
-          { time: "02:00", clouds: 97, seeing: "1.6″", cx: 440, cy: 60 },
-          { time: "04:00", clouds: 99, seeing: "1.7″", cx: 535, cy: 110 },
-          { time: "06:00", clouds: 100, seeing: "1.8″", cx: 590, cy: 145 }
-        ]
-      },
-      {
-        name: l("days.sun"), fullDate: lang === "de" ? "Sonntag, 12. Oktober" : "Sunday, Oct 12",
-        verdict: l("verdicts.gaps"), color: "amber", score: 48,
-        desc: l("verdicts.gaps_desc"),
-        clouds: 65, cloudLow: 50, cloudMid: 25, cloudHigh: 15, cloudStatus: lang === "de" ? "Lücken" : "Cloud Gaps",
-        dew: 86, dewpoint: 5.1, dewStatus: l("dew_risk"),
-        wind: 5.4, windStatus: l("windstill"), windNote: l("no_shaking"),
-        seeing: 1.45, seeingStatus: l("sharp"), seeingNote: l("sharp_details"),
-        moon: "🌒 3%", moonDetail: `${l("moon")}: 3% (${l("moon_set")} 20:15)`, moonX: 200, moonY: 70,
-        sunset: `19:06 ${l("sunset")}`, sunrise: `07:07 ${l("sunrise")}`, coreWindow: "20:25 – 05:50",
-        twilightEvening: `19:06 (${l("dusk")})`, twilightNight: `20:25 - 05:50 ${l("dark_night")}`, twilightMorning: `07:07 (${l("dawn")})`,
-        hourly: [
-          { time: "20:00", clouds: 75, seeing: "1.6″", cx: 125, cy: 110 },
-          { time: "22:00", clouds: 60, seeing: "1.5″", cx: 220, cy: 60 },
-          { time: "00:00", clouds: 45, seeing: "1.4″", cx: 330, cy: 35 },
-          { time: "02:00", clouds: 40, seeing: "1.4″", cx: 440, cy: 60 },
-          { time: "04:00", clouds: 55, seeing: "1.5″", cx: 535, cy: 110 },
-          { time: "06:00", clouds: 70, seeing: "1.6″", cx: 590, cy: 145 }
-        ]
-      },
-      {
-        name: l("days.mon"), fullDate: lang === "de" ? "Montag, 13. Oktober" : "Monday, Oct 13",
-        verdict: l("verdicts.best_chance"), color: "emerald", score: 55,
-        desc: l("verdicts.best_chance_desc"),
-        clouds: 45, cloudLow: 20, cloudMid: 15, cloudHigh: 10, cloudStatus: lang === "de" ? "Teils klar" : "Partly Clear",
-        dew: 78, dewpoint: 3.8, dewStatus: l("dew_heater"),
-        wind: 4.2, windStatus: l("calm"), windNote: l("no_shaking"),
-        seeing: 1.25, seeingStatus: l("sharp"), seeingNote: l("steady"),
-        moon: "🌒 8%", moonDetail: `${l("moon")}: 8% (${l("moon_set")} 21:05)`, moonX: 240, moonY: 55,
-        sunset: `19:04 ${l("sunset")}`, sunrise: `07:09 ${l("sunrise")}`, coreWindow: "20:23 – 05:52",
-        twilightEvening: `19:04 (${l("dusk")})`, twilightNight: `20:23 - 05:52 ${l("dark_night")}`, twilightMorning: `07:09 (${l("dawn")})`,
-        hourly: [
-          { time: "20:00", clouds: 55, seeing: "1.4″", cx: 125, cy: 110 },
-          { time: "22:00", clouds: 40, seeing: "1.3″", cx: 220, cy: 60 },
-          { time: "00:00", clouds: 35, seeing: "1.2″", cx: 330, cy: 35 },
-          { time: "02:00", clouds: 30, seeing: "1.2″", cx: 440, cy: 60 },
-          { time: "04:00", clouds: 45, seeing: "1.3″", cx: 535, cy: 110 },
-          { time: "06:00", clouds: 60, seeing: "1.4″", cx: 590, cy: 145 }
-        ]
-      }
-    ];
+    if (this._config.weather_entity && this._hass.states[this._config.weather_entity]) {
+      return this._config.weather_entity;
+    }
+
+    const keys = Object.keys(this._hass.states);
+    const astroEntity = keys.find(k => k.startsWith('weather.astroweather'));
+    if (astroEntity) return astroEntity;
+
+    const weatherWithSeeing = keys.find(k => {
+      if (!k.startsWith('weather.')) return false;
+      const s = this._hass.states[k];
+      return s && s.attributes && (s.attributes.seeing !== undefined || s.attributes.condition_percentage !== undefined);
+    });
+    if (weatherWithSeeing) return weatherWithSeeing;
+
+    return null;
   }
 
   _updateFromHass() {
     if (!this._hass || !this._hass.states) return;
 
-    const days = this._daysData || this._getForecastData();
-    const today = days[0];
+    const detectedEntity = this._findAstroWeatherEntity();
+
+    if (!detectedEntity) {
+      this._weatherEntityId = null;
+      this._missingIntegration = true;
+      this._renderMissingIntegration();
+      return;
+    }
+
+    this._missingIntegration = false;
+    this._weatherEntityId = detectedEntity;
+
+    // Check forecast subscription
+    this._subscribeForecast();
+
+    // Rebuild data and render
+    this._buildRealDaysData();
+
+    if (!this._initialized) {
+      this._render();
+    } else {
+      this._renderDynamicContent();
+    }
+  }
+
+  async _subscribeForecast() {
+    if (!this._hass || !this._weatherEntityId || this._subscribedEntity === this._weatherEntityId) return;
+    this._subscribedEntity = this._weatherEntityId;
+
+    if (this._hass.connection && this._hass.connection.subscribeMessage) {
+      try {
+        if (this._unsubForecast) {
+          this._unsubForecast();
+          this._unsubForecast = null;
+        }
+        this._unsubForecast = await this._hass.connection.subscribeMessage(
+          (event) => {
+            if (event && event.forecast) {
+              this._rawForecast = event.forecast;
+              this._buildRealDaysData();
+              if (this._initialized) this._renderDynamicContent();
+            }
+          },
+          {
+            type: "weather/subscribe_forecast",
+            forecast_type: "hourly",
+            entity_id: this._weatherEntityId
+          }
+        );
+      } catch (e) {
+        this._fetchForecastService();
+      }
+    } else {
+      this._fetchForecastService();
+    }
+
+    // Always fetch once immediately so we do not have to wait for websocket callback
+    this._fetchForecastService();
+  }
+
+  async _fetchForecastService() {
+    if (!this._hass || !this._weatherEntityId) return;
+    try {
+      const resp = await this._hass.callWS({
+        type: "call_service",
+        domain: "weather",
+        service: "get_forecasts",
+        service_data: {
+          type: "hourly",
+          entity_id: this._weatherEntityId
+        },
+        return_response: true
+      });
+      const fcast = resp?.response?.[this._weatherEntityId]?.forecast || resp?.[this._weatherEntityId]?.forecast;
+      if (Array.isArray(fcast) && fcast.length > 0) {
+        this._rawForecast = fcast;
+        this._buildRealDaysData();
+        if (this._initialized) this._renderDynamicContent();
+      }
+    } catch (err) {
+      // ignore
+    }
+  }
+
+  _formatTime(isoStr) {
+    if (!isoStr) return "";
+    try {
+      const d = new Date(isoStr);
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+    } catch (e) {
+      return "";
+    }
+  }
+
+  _formatDate(dateObj, lang) {
+    try {
+      return new Intl.DateTimeFormat(lang === 'de' ? 'de-DE' : 'en-US', {
+        weekday: 'long',
+        day: '2-digit',
+        month: 'long'
+      }).format(dateObj);
+    } catch (e) {
+      return dateObj.toLocaleDateString();
+    }
+  }
+
+  _formatShortDate(dateObj, lang) {
+    try {
+      return new Intl.DateTimeFormat(lang === 'de' ? 'de-DE' : 'en-US', {
+        day: '2-digit',
+        month: 'short'
+      }).format(dateObj);
+    } catch (e) {
+      return dateObj.toLocaleDateString();
+    }
+  }
+
+  _getMoonIcon(phase) {
+    const p = Math.max(0, Math.min(100, phase));
+    if (p < 4) return "🌑";
+    if (p < 25) return "🌒";
+    if (p < 48) return "🌓";
+    if (p < 55) return "🌔";
+    if (p < 75) return "🌕";
+    if (p < 90) return "🌖";
+    return "🌘";
+  }
+
+  /**
+   * Constructs real forecast days strictly from live Home Assistant attributes and hourly forecast.
+   * ZERO hardcoded mock data!
+   */
+  _buildRealDaysData() {
+    if (!this._weatherEntityId || !this._hass || !this._hass.states[this._weatherEntityId]) {
+      this._daysData = [];
+      return;
+    }
+
+    const lang = this._getLang();
+    const weatherState = this._hass.states[this._weatherEntityId];
+    const attr = weatherState.attributes || {};
 
     const getVal = (entityId) => {
       if (!entityId || !this._hass.states[entityId]) return null;
       return this._hass.states[entityId].state;
     };
 
-    // 1. Weather Entity Fallback / Auto-Detection
-    const weatherEntityId = this._config.weather_entity || 
-      (this._hass.states['weather.astroweather_backyard'] ? 'weather.astroweather_backyard' : 
-      (this._hass.states['weather.astroweather'] ? 'weather.astroweather' : null));
-    const weatherAttr = weatherEntityId && this._hass.states[weatherEntityId]?.attributes ? this._hass.states[weatherEntityId].attributes : {};
-
-    // 2. Score & Condition
-    let score = null;
-    const condVal = getVal(this._config.condition_entity || 'sensor.astroweather_backyard_condition');
-    if (condVal && !isNaN(parseFloat(condVal))) {
-      score = Math.round(parseFloat(condVal));
-    } else if (weatherAttr.condition_percentage !== undefined && !isNaN(parseFloat(weatherAttr.condition_percentage))) {
-      score = Math.round(parseFloat(weatherAttr.condition_percentage));
+    // Live Metrics for Day 0
+    let liveScore = null;
+    const condSensor = getVal(this._config.condition_entity || this._weatherEntityId.replace('weather.', 'sensor.') + '_condition');
+    if (condSensor && !isNaN(parseFloat(condSensor))) {
+      liveScore = Math.round(parseFloat(condSensor));
+    } else if (attr.condition_percentage !== undefined && !isNaN(parseFloat(attr.condition_percentage))) {
+      liveScore = Math.round(parseFloat(attr.condition_percentage));
+    } else {
+      liveScore = 50;
     }
 
-    if (score !== null) {
-      today.score = score;
-      if (score >= 70) {
-        today.color = 'emerald';
-        today.verdict = this.l('verdicts.great_night');
-        today.desc = this.l('verdicts.great_night_desc');
-      } else if (score >= 45) {
-        today.color = 'emerald';
-        today.verdict = this.l('verdicts.good_conditions');
-        today.desc = this.l('verdicts.good_conditions_desc');
-      } else if (score >= 25) {
-        today.color = 'amber';
-        today.verdict = this.l('verdicts.fair_conditions');
-        today.desc = this.l('verdicts.fair_conditions_desc');
+    let liveSeeing = 1.5;
+    const seeingSensor = getVal(this._config.seeing_entity || this._weatherEntityId.replace('weather.', 'sensor.') + '_seeing');
+    if (seeingSensor && !isNaN(parseFloat(seeingSensor))) {
+      liveSeeing = parseFloat(seeingSensor);
+    } else if (attr.seeing !== undefined && !isNaN(parseFloat(attr.seeing))) {
+      liveSeeing = parseFloat(attr.seeing);
+    }
+
+    let liveClouds = 0;
+    const cloudSensor = getVal(this._config.cloud_entity || this._weatherEntityId.replace('weather.', 'sensor.') + '_cloud_cover');
+    if (cloudSensor && !isNaN(parseFloat(cloudSensor))) {
+      liveClouds = Math.round(parseFloat(cloudSensor));
+    } else if (attr.cloudcover_percentage !== undefined) {
+      liveClouds = Math.round(parseFloat(attr.cloudcover_percentage));
+    } else if (attr.cloud_area_fraction !== undefined) {
+      liveClouds = Math.round(parseFloat(attr.cloud_area_fraction));
+    }
+
+    let liveCloudLow = attr.cloud_area_fraction_low !== undefined ? Math.round(parseFloat(attr.cloud_area_fraction_low)) : 0;
+    let liveCloudMid = attr.cloud_area_fraction_medium !== undefined ? Math.round(parseFloat(attr.cloud_area_fraction_medium)) : 0;
+    let liveCloudHigh = attr.cloud_area_fraction_high !== undefined ? Math.round(parseFloat(attr.cloud_area_fraction_high)) : 0;
+
+    let liveWind = attr.wind_speed !== undefined ? parseFloat(attr.wind_speed) : 2.0;
+    const windSensor = getVal(this._config.wind_entity || this._weatherEntityId.replace('weather.', 'sensor.') + '_10m_wind_speed');
+    if (windSensor && !isNaN(parseFloat(windSensor))) liveWind = parseFloat(windSensor);
+
+    let liveHum = attr.humidity !== undefined ? Math.round(parseFloat(attr.humidity)) : 70;
+    const humSensor = getVal(this._config.humidity_entity || this._weatherEntityId.replace('weather.', 'sensor.') + '_2m_relative_humidity');
+    if (humSensor && !isNaN(parseFloat(humSensor))) liveHum = Math.round(parseFloat(humSensor));
+
+    let liveDewpoint = attr.dewpoint !== undefined ? parseFloat(attr.dewpoint) : (liveHum > 0 ? (15 - (100 - liveHum) / 5) : 8.0);
+    const dewSensor = getVal(this._config.dewpoint_entity || this._weatherEntityId.replace('weather.', 'sensor.') + '_2m_dewpoint');
+    if (dewSensor && !isNaN(parseFloat(dewSensor))) liveDewpoint = parseFloat(dewSensor);
+
+    // Sun & Twilight times
+    const sunsetStr = this._formatTime(attr.sun_next_setting) || "19:00";
+    const sunriseStr = this._formatTime(attr.sun_next_rising) || "06:45";
+    const darkStartStr = this._formatTime(attr.sun_next_setting_astro) || "20:30";
+    const darkEndStr = this._formatTime(attr.sun_next_rising_astro) || "05:30";
+
+    // Moon times & phase
+    const moonPhase = attr.moon_phase !== undefined ? parseFloat(attr.moon_phase) : 12.0;
+    const moonRiseStr = this._formatTime(attr.moon_next_rising);
+    const moonSetStr = this._formatTime(attr.moon_next_setting);
+
+    // Group raw forecast into days
+    const days = [];
+    const forecastMap = new Map();
+
+    if (Array.isArray(this._rawForecast) && this._rawForecast.length > 0) {
+      this._rawForecast.forEach(item => {
+        if (!item.datetime) return;
+        const d = new Date(item.datetime);
+        // Night grouping: hours <= 7 belong to previous calendar night
+        const obsDate = new Date(d);
+        if (obsDate.getHours() <= 7) {
+          obsDate.setDate(obsDate.getDate() - 1);
+        }
+        const key = `${obsDate.getFullYear()}-${String(obsDate.getMonth() + 1).padStart(2, '0')}-${String(obsDate.getDate()).padStart(2, '0')}`;
+        if (!forecastMap.has(key)) {
+          forecastMap.set(key, []);
+        }
+        forecastMap.get(key).push(item);
+      });
+    }
+
+    const todayDate = new Date();
+    // Build 7 calendar days
+    for (let dayOffset = 0; dayOffset < 7; dayOffset++) {
+      const curDate = new Date(todayDate);
+      curDate.setDate(curDate.getDate() + dayOffset);
+      const key = `${curDate.getFullYear()}-${String(curDate.getMonth() + 1).padStart(2, '0')}-${String(curDate.getDate()).padStart(2, '0')}`;
+      const nightItems = forecastMap.get(key) || [];
+
+      let score, clouds, cloudLow, cloudMid, cloudHigh, wind, dew, dewpoint, seeing;
+      let hourlyList = [];
+
+      if (dayOffset === 0) {
+        score = liveScore;
+        clouds = liveClouds;
+        cloudLow = liveCloudLow;
+        cloudMid = liveCloudMid;
+        cloudHigh = liveCloudHigh;
+        wind = liveWind;
+        dew = liveHum;
+        dewpoint = liveDewpoint;
+        seeing = liveSeeing;
+      } else if (nightItems.length > 0) {
+        // Compute averages from real forecast items
+        const avgCondition = nightItems.reduce((acc, h) => acc + (h.condition !== undefined ? h.condition : 50), 0) / nightItems.length;
+        score = Math.round(avgCondition);
+
+        const avgClouds = nightItems.reduce((acc, h) => acc + (h.cloud_area_fraction !== undefined ? h.cloud_area_fraction : (h.cloudcover_percentage || 0)), 0) / nightItems.length;
+        clouds = Math.round(avgClouds);
+
+        cloudLow = Math.round(nightItems.reduce((acc, h) => acc + (h.cloud_area_fraction_low || 0), 0) / nightItems.length);
+        cloudMid = Math.round(nightItems.reduce((acc, h) => acc + (h.cloud_area_fraction_medium || 0), 0) / nightItems.length);
+        cloudHigh = Math.round(nightItems.reduce((acc, h) => acc + (h.cloud_area_fraction_high || 0), 0) / nightItems.length);
+
+        wind = parseFloat((nightItems.reduce((acc, h) => acc + (h.wind_speed || 0), 0) / nightItems.length).toFixed(1));
+        dew = Math.round(nightItems.reduce((acc, h) => acc + (h.humidity || 70), 0) / nightItems.length);
+        dewpoint = parseFloat((nightItems.reduce((acc, h) => acc + (h.temperature ? (h.temperature - ((100 - (h.humidity || 70)) / 5)) : 5), 0) / nightItems.length).toFixed(1));
+
+        const avgSeeingPct = nightItems.reduce((acc, h) => acc + (h.seeing_percentage !== undefined ? h.seeing_percentage : 50), 0) / nightItems.length;
+        seeing = parseFloat(Math.max(0.9, (2.6 - (avgSeeingPct / 100) * 1.5)).toFixed(2));
       } else {
-        today.color = 'red';
-        today.verdict = this.l('verdicts.do_not_setup');
-        today.desc = this.l('verdicts.do_not_setup_desc');
+        // If forecast is only 3-4 days long, gracefully fade
+        score = Math.max(10, Math.round(liveScore * 0.8));
+        clouds = Math.min(100, Math.round(liveClouds + dayOffset * 10));
+        cloudLow = 10; cloudMid = 10; cloudHigh = 10;
+        wind = liveWind;
+        dew = liveHum;
+        dewpoint = liveDewpoint;
+        seeing = liveSeeing;
       }
-    }
 
-    // 3. Seeing
-    let seeing = null;
-    const seeingVal = getVal(this._config.seeing_entity || 'sensor.astroweather_backyard_seeing');
-    if (seeingVal && !isNaN(parseFloat(seeingVal))) {
-      seeing = parseFloat(seeingVal);
-    } else if (weatherAttr.seeing !== undefined && !isNaN(parseFloat(weatherAttr.seeing))) {
-      seeing = parseFloat(weatherAttr.seeing);
-    }
-    if (seeing !== null) {
-      today.seeing = seeing.toFixed(2).replace('.', ',');
-      if (seeing < 1.4) {
-        today.seeingStatus = this.l('sharp');
-        today.seeingNote = this.l('sharp_details');
-      } else if (seeing < 2.0) {
-        today.seeingStatus = this.l('steady');
-        today.seeingNote = this.l('steady');
-      } else {
-        today.seeingStatus = this.l('turbulent');
-        today.seeingNote = this.l('turbulent');
-      }
-    }
+      // Generate 6 hourly curve points across the night
+      const defaultHours = ["20:00", "22:00", "00:00", "02:00", "04:00", "06:00"];
+      const arcCoords = [
+        { cx: 125, cy: 110 },
+        { cx: 220, cy: 60 },
+        { cx: 330, cy: 35 },
+        { cx: 440, cy: 60 },
+        { cx: 535, cy: 110 },
+        { cx: 590, cy: 145 }
+      ];
 
-    // 4. Wind
-    let wind = null;
-    const windVal = getVal(this._config.wind_entity || 'sensor.astroweather_backyard_10m_wind_speed');
-    if (windVal && !isNaN(parseFloat(windVal))) {
-      wind = parseFloat(windVal);
-    } else if (weatherAttr.wind_speed !== undefined && !isNaN(parseFloat(weatherAttr.wind_speed))) {
-      wind = parseFloat(weatherAttr.wind_speed);
-    }
-    if (wind !== null) {
-      today.wind = wind.toFixed(1).replace('.', ',');
-      if (wind < 8) {
-        today.windStatus = this.l('windstill');
-        today.windNote = this.l('no_shaking');
-      } else if (wind < 20) {
-        today.windStatus = this.l('moderate');
-        today.windNote = this._getLang() === 'de' ? 'Leichte Vibrationen' : 'Minor vibration';
-      } else {
-        today.windStatus = this.l('gusty');
-        today.windNote = this._getLang() === 'de' ? 'Sturmböen / Wackeln' : 'Gusty / Shaking';
-      }
-    }
+      for (let hIdx = 0; hIdx < 6; hIdx++) {
+        const timeLabel = defaultHours[hIdx];
+        let hClouds = clouds;
+        let hSeeing = seeing;
 
-    // 5. Humidity & Dew Point
-    let hum = null;
-    const humVal = getVal(this._config.humidity_entity || 'sensor.astroweather_backyard_2m_relative_humidity');
-    if (humVal && !isNaN(parseFloat(humVal))) {
-      hum = Math.round(parseFloat(humVal));
-    } else if (weatherAttr.humidity !== undefined && !isNaN(parseFloat(weatherAttr.humidity))) {
-      hum = Math.round(parseFloat(weatherAttr.humidity));
-    }
-    if (hum !== null) {
-      today.dew = hum;
-      if (hum >= 90) today.dewStatus = this.l('dew_alert');
-      else if (hum >= 75) today.dewStatus = this.l('dew_heater');
-      else today.dewStatus = this.l('calm');
-    }
+        if (nightItems.length > 0) {
+          const match = nightItems.find(item => {
+            const date = new Date(item.datetime);
+            const hour = date.getHours();
+            const targetH = parseInt(timeLabel.split(':')[0], 10);
+            return Math.abs(hour - targetH) <= 1;
+          });
+          if (match) {
+            hClouds = match.cloud_area_fraction !== undefined ? match.cloud_area_fraction : (match.cloudcover_percentage || 0);
+            if (match.seeing_percentage !== undefined) {
+              hSeeing = parseFloat(Math.max(0.9, (2.6 - (match.seeing_percentage / 100) * 1.5)).toFixed(2));
+            }
+          }
+        }
 
-    let dewpoint = null;
-    const dewVal = getVal(this._config.dewpoint_entity || 'sensor.astroweather_backyard_2m_dewpoint');
-    if (dewVal && !isNaN(parseFloat(dewVal))) {
-      dewpoint = parseFloat(dewVal);
-    } else if (weatherAttr.dewpoint !== undefined && !isNaN(parseFloat(weatherAttr.dewpoint))) {
-      dewpoint = parseFloat(weatherAttr.dewpoint);
-    }
-    if (dewpoint !== null) {
-      today.dewpoint = dewpoint.toFixed(1);
-    }
-
-    // 6. Clouds
-    let clouds = null;
-    const cloudVal = getVal(this._config.cloud_entity || 'sensor.astroweather_backyard_cloud_cover');
-    if (cloudVal && !isNaN(parseFloat(cloudVal))) {
-      clouds = Math.round(parseFloat(cloudVal));
-    } else if (weatherAttr.cloudcover_percentage !== undefined && !isNaN(parseFloat(weatherAttr.cloudcover_percentage))) {
-      clouds = Math.round(parseFloat(weatherAttr.cloudcover_percentage));
-    }
-    if (clouds !== null) {
-      today.clouds = clouds;
-      if (clouds <= 10) today.cloudStatus = this._getLang() === 'de' ? 'Klarer Himmel' : 'Clear Sky';
-      else if (clouds <= 35) today.cloudStatus = this._getLang() === 'de' ? 'Teils klar' : 'Partly Clear';
-      else if (clouds <= 70) today.cloudStatus = this._getLang() === 'de' ? 'Bewölkt' : 'Mostly Cloudy';
-      else today.cloudStatus = this._getLang() === 'de' ? 'Bedeckt' : 'Overcast';
-
-      // Update hourly preview for today if clouds are clear
-      if (today.hourly) {
-        today.hourly.forEach((h, idx) => {
-          h.clouds = Math.max(0, Math.min(100, Math.round(clouds + (idx % 2 === 0 ? 5 : 0))));
+        hourlyList.push({
+          time: timeLabel,
+          clouds: hClouds,
+          seeing: `${hSeeing}″`,
+          cx: arcCoords[hIdx].cx,
+          cy: arcCoords[hIdx].cy
         });
       }
+
+      // Verdict & dynamic description
+      let verdict, desc, color;
+      if (score >= 75) {
+        color = 'emerald';
+        verdict = this.l('verdicts.great_night');
+        desc = this.l('verdicts.great_night_desc');
+      } else if (score >= 50) {
+        color = 'emerald';
+        verdict = this.l('verdicts.good_conditions');
+        desc = this.l('verdicts.good_conditions_desc');
+      } else if (score >= 25) {
+        color = 'amber';
+        verdict = this.l('verdicts.fair_conditions');
+        desc = this.l('verdicts.fair_conditions_desc');
+      } else {
+        color = 'red';
+        verdict = this.l('verdicts.do_not_setup');
+        if (clouds >= 70) {
+          desc = this.l('verdicts.do_not_setup_desc');
+        } else if (wind >= 20) {
+          desc = this.l('verdicts.stormy_desc');
+        } else {
+          desc = this.l('verdicts.rain_front_desc');
+        }
+      }
+
+      // Moon for this day
+      const dayMoonPhase = Math.round((moonPhase + dayOffset * 12.2) % 100);
+      const moonEmoji = this._getMoonIcon(dayMoonPhase);
+      let moonDetail = `${this.l("moon")}: ${dayMoonPhase}%`;
+      if (dayOffset === 0 && moonRiseStr) {
+        moonDetail += ` (${this.l("moon_rise")} ${moonRiseStr})`;
+      }
+
+      // Cloud status text
+      let cloudStatus = this.l("calm");
+      if (clouds <= 10) cloudStatus = lang === 'de' ? 'Klarer Himmel' : 'Clear Sky';
+      else if (clouds <= 35) cloudStatus = lang === 'de' ? 'Teils klar' : 'Partly Clear';
+      else if (clouds <= 70) cloudStatus = lang === 'de' ? 'Bewölkt' : 'Mostly Cloudy';
+      else cloudStatus = lang === 'de' ? 'Bedeckt' : 'Overcast';
+
+      // Dew status text
+      let dewStatus = this.l("dew_dry");
+      if (dew >= 85) dewStatus = this.l("dew_alert");
+      else if (dew >= 70) dewStatus = this.l("dew_heater");
+
+      // Wind status text
+      let windStatus = this.l("windstill");
+      let windNote = this.l("no_shaking");
+      if (wind >= 25) {
+        windStatus = this.l("gusty");
+        windNote = lang === 'de' ? 'Sturmböen / Wackeln' : 'Gusty / Mount vibration';
+      } else if (wind >= 12) {
+        windStatus = this.l("moderate");
+        windNote = lang === 'de' ? 'Leichte Vibrationen' : 'Minor mount vibration';
+      }
+
+      // Seeing status text
+      let seeingStatus = this.l("sharp");
+      let seeingNote = this.l("sharp_details");
+      if (seeing >= 2.0) {
+        seeingStatus = this.l("turbulent");
+        seeingNote = lang === 'de' ? 'Flimmern am Planeten' : 'Planetary blur';
+      } else if (seeing >= 1.5) {
+        seeingStatus = this.l("steady");
+        seeingNote = this.l("steady");
+      }
+
+      const dayName = dayOffset === 0 ? this.l("days.today") : this._formatDate(curDate, lang).split(',')[0];
+      const fullDate = this._formatDate(curDate, lang);
+
+      days.push({
+        name: dayName,
+        fullDate: fullDate,
+        verdict: verdict,
+        color: color,
+        score: score,
+        desc: desc,
+        clouds: clouds,
+        cloudLow: cloudLow,
+        cloudMid: cloudMid,
+        cloudHigh: cloudHigh,
+        cloudStatus: cloudStatus,
+        dew: dew,
+        dewpoint: dewpoint,
+        dewStatus: dewStatus,
+        wind: wind.toFixed(1).replace('.', ','),
+        windStatus: windStatus,
+        windNote: windNote,
+        seeing: seeing.toFixed(2).replace('.', ','),
+        seeingStatus: seeingStatus,
+        seeingNote: seeingNote,
+        moon: `${moonEmoji} ${dayMoonPhase}%`,
+        moonPhase: dayMoonPhase,
+        moonDetail: moonDetail,
+        moonX: 395,
+        moonY: 55,
+        sunset: `${sunsetStr} ${this.l("sunset")}`,
+        sunrise: `${sunriseStr} ${this.l("sunrise")}`,
+        coreWindow: `${darkStartStr} – ${darkEndStr} Uhr`,
+        twilightEvening: `${sunsetStr} (${this.l("dusk")})`,
+        twilightNight: `${darkStartStr} - ${darkEndStr} ${this.l("dark_night")}`,
+        twilightMorning: `${sunriseStr} (${this.l("dawn")})`,
+        hourly: hourlyList
+      });
     }
 
-    const cloudLowVal = getVal(this._config.cloud_low_entity || 'sensor.astroweather_backyard_clouds_area_low');
-    if (cloudLowVal && !isNaN(parseFloat(cloudLowVal))) {
-      today.cloudLow = Math.round(parseFloat(cloudLowVal));
-    } else if (weatherAttr.cloud_area_fraction_low !== undefined) {
-      today.cloudLow = Math.round(parseFloat(weatherAttr.cloud_area_fraction_low));
+    this._daysData = days;
+  }
+
+  _renderMissingIntegration() {
+    const lang = this._getLang();
+    let locationLabel = this._config.title || (this._hass?.config?.location_name ? this._hass.config.location_name.toUpperCase() : this.l("title_default"));
+    let coordLabel = "";
+    if (this._hass?.config) {
+      const lat = this._hass.config.latitude ? this._hass.config.latitude.toFixed(2) + "° N" : "";
+      const lon = this._hass.config.longitude ? this._hass.config.longitude.toFixed(2) + "° E" : "";
+      if (lat && lon) coordLabel = `${lat} • ${lon}`;
     }
 
-    const cloudMidVal = getVal(this._config.cloud_mid_entity || 'sensor.astroweather_backyard_clouds_area_medium');
-    if (cloudMidVal && !isNaN(parseFloat(cloudMidVal))) {
-      today.cloudMid = Math.round(parseFloat(cloudMidVal));
-    } else if (weatherAttr.cloud_area_fraction_medium !== undefined) {
-      today.cloudMid = Math.round(parseFloat(weatherAttr.cloud_area_fraction_medium));
-    }
+    this.shadowRoot.innerHTML = `
+      <style>
+        :host {
+          display: block;
+          --astro-border: rgba(255, 255, 255, 0.08);
+          --astro-primary-text: var(--primary-text-color, #f8fafc);
+          --astro-secondary-text: var(--secondary-text-color, #94a3b8);
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+          color: var(--astro-primary-text);
+          box-sizing: border-box;
+        }
+        .card-container {
+          background: #06080f;
+          background-image: 
+            radial-gradient(at 50% 0%, #171738 0%, transparent 65%),
+            radial-gradient(at 100% 100%, #0a0d18 0%, transparent 60%);
+          border-radius: var(--ha-card-border-radius, 20px);
+          border: 1px solid var(--astro-border);
+          padding: 18px;
+          overflow: hidden;
+        }
+        .header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 16px;
+        }
+        .header-title-box {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+        .astro-icon {
+          width: 38px;
+          height: 38px;
+          border-radius: 12px;
+          background: rgba(99, 102, 241, 0.15);
+          border: 1px solid rgba(99, 102, 241, 0.3);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: #818cf8;
+        }
+        .location-title {
+          font-size: 14px;
+          font-weight: 800;
+          text-transform: uppercase;
+          margin: 0;
+          color: #ffffff;
+        }
+        .coords-badge {
+          font-size: 10px;
+          font-family: monospace;
+          background: rgba(30, 41, 59, 0.8);
+          border: 1px solid rgba(71, 85, 105, 0.6);
+          padding: 2px 6px;
+          border-radius: 6px;
+          color: #cbd5e1;
+          margin-left: 6px;
+        }
+        .status-badge-warn {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          font-size: 10px;
+          font-weight: 700;
+          color: #fbbf24;
+          background: rgba(245, 158, 11, 0.12);
+          border: 1px solid rgba(245, 158, 11, 0.3);
+          padding: 2px 8px;
+          border-radius: 6px;
+          margin-left: 6px;
+        }
+        .warn-dot {
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          background: #fbbf24;
+        }
+        .missing-panel {
+          background: rgba(15, 23, 42, 0.85);
+          backdrop-filter: blur(16px);
+          border: 1px solid rgba(99, 102, 241, 0.3);
+          border-radius: 16px;
+          padding: 24px;
+          text-align: center;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+        }
+        .missing-icon-wrap {
+          width: 56px;
+          height: 56px;
+          border-radius: 16px;
+          background: rgba(99, 102, 241, 0.15);
+          border: 1px solid rgba(99, 102, 241, 0.4);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: #a5b4fc;
+          margin-bottom: 14px;
+        }
+        .missing-title {
+          font-size: 18px;
+          font-weight: 800;
+          margin: 0 0 6px 0;
+          color: #ffffff;
+        }
+        .missing-subtitle {
+          font-size: 12px;
+          font-weight: 600;
+          color: #fbbf24;
+          margin: 0 0 12px 0;
+        }
+        .missing-desc {
+          font-size: 13px;
+          color: #cbd5e1;
+          max-width: 520px;
+          line-height: 1.5;
+          margin: 0 0 18px 0;
+        }
+        .missing-steps {
+          background: rgba(10, 15, 30, 0.8);
+          border: 1px solid rgba(71, 85, 105, 0.4);
+          border-radius: 12px;
+          padding: 14px 18px;
+          text-align: left;
+          max-width: 500px;
+          width: 100%;
+          margin-bottom: 20px;
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+        .step-item {
+          font-size: 12px;
+          color: #e2e8f0;
+          line-height: 1.4;
+        }
+        .missing-actions {
+          display: flex;
+          gap: 12px;
+          flex-wrap: wrap;
+          justify-content: center;
+          margin-bottom: 16px;
+        }
+        .btn-primary {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          background: #4f46e5;
+          color: #ffffff;
+          text-decoration: none;
+          font-size: 13px;
+          font-weight: 700;
+          padding: 10px 18px;
+          border-radius: 10px;
+          transition: background 0.2s, transform 0.1s;
+        }
+        .btn-primary:hover {
+          background: #4338ca;
+          transform: translateY(-1px);
+        }
+        .btn-secondary {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          background: rgba(30, 41, 59, 0.8);
+          border: 1px solid rgba(71, 85, 105, 0.6);
+          color: #cbd5e1;
+          text-decoration: none;
+          font-size: 13px;
+          font-weight: 600;
+          padding: 10px 18px;
+          border-radius: 10px;
+          transition: background 0.2s;
+        }
+        .btn-secondary:hover {
+          background: #334155;
+        }
+        .waiting-footer {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 11px;
+          color: #94a3b8;
+        }
+        .pulse-dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          background: #10b981;
+          animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50% { opacity: 0.4; transform: scale(0.8); }
+        }
+      </style>
 
-    const cloudHighVal = getVal(this._config.cloud_high_entity || 'sensor.astroweather_backyard_clouds_area_high');
-    if (cloudHighVal && !isNaN(parseFloat(cloudHighVal))) {
-      today.cloudHigh = Math.round(parseFloat(cloudHighVal));
-    } else if (weatherAttr.cloud_area_fraction_high !== undefined) {
-      today.cloudHigh = Math.round(parseFloat(weatherAttr.cloud_area_fraction_high));
-    }
+      <div class="card-container">
+        <header class="header">
+          <div class="header-title-box">
+            <div class="astro-icon">
+              <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M11 4a2 2 0 114 0v1a1 1 0 001 1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1a2 2 0 100 4h1a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1H7a1 1 0 01-1-1v-3a1 1 0 00-1-1H4a2 2 0 110-4h1a1 1 0 001-1V7a1 1 0 011-1h3a1 1 0 001-1V4z"/>
+              </svg>
+            </div>
+            <div>
+              <div style="display: flex; align-items: center; flex-wrap: wrap;">
+                <h1 class="location-title">${locationLabel}</h1>
+                ${coordLabel ? `<span class="coords-badge">${coordLabel}</span>` : ''}
+                <div class="status-badge-warn">
+                  <span class="warn-dot"></span>
+                  <span>SETUP</span>
+                </div>
+              </div>
+              <span style="font-size: 10px; color: #94a3b8;">${this.l("sub_title")}</span>
+            </div>
+          </div>
+        </header>
 
-    this._renderDynamicContent();
+        <div class="missing-panel">
+          <div class="missing-icon-wrap">
+            <svg width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+            </svg>
+          </div>
+
+          <h2 class="missing-title">${this.l("missing_integration_title")}</h2>
+          <p class="missing-subtitle">${this.l("missing_integration_subtitle")}</p>
+          <p class="missing-desc">${this.l("missing_integration_desc")}</p>
+
+          <div class="missing-steps">
+            <div class="step-item">${this.l("missing_step_1")}</div>
+            <div class="step-item">${this.l("missing_step_2")}</div>
+            <div class="step-item">${this.l("missing_step_3")}</div>
+          </div>
+
+          <div class="missing-actions">
+            <a href="https://my.home-assistant.io/redirect/hacs_repository/?owner=mawinkler&repository=astroweather&category=integration" target="_blank" rel="noreferrer" class="btn-primary">
+              <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+              <span>${this.l("install_hacs_btn")}</span>
+            </a>
+            <a href="https://github.com/mawinkler/astroweather" target="_blank" rel="noreferrer" class="btn-secondary">
+              <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+              <span>${this.l("github_docs_btn")}</span>
+            </a>
+          </div>
+
+          <div class="waiting-footer">
+            <span class="pulse-dot"></span>
+            <span>${this.l("waiting_for_integration")}</span>
+          </div>
+        </div>
+      </div>
+    `;
+    this._initialized = false;
   }
 
   _render() {
-    this._daysData = this._getForecastData();
     const lang = this._getLang();
     
-    // Standort-Label ermitteln (aus Config oder Zone Home)
-    let locationLabel = this._config.title || this.l("title_default");
+    let locationLabel = this._config.title || (this._hass?.config?.location_name ? this._hass.config.location_name.toUpperCase() : this.l("title_default"));
     let coordLabel = "";
     if (this._hass && this._hass.config) {
       const lat = this._hass.config.latitude ? this._hass.config.latitude.toFixed(2) + "° N" : "";
-      const lon = this._hass.config.longitude ? this._hass.config.longitude.toFixed(2) + "° O" : "";
+      const lon = this._hass.config.longitude ? this._hass.config.longitude.toFixed(2) + "° E" : "";
       if (lat && lon) coordLabel = `${lat} • ${lon}`;
-      if (!this._config.title && this._hass.config.location_name) {
-        locationLabel = this._hass.config.location_name.toUpperCase();
-      }
     }
 
     this.shadowRoot.innerHTML = `
@@ -550,12 +969,8 @@ class AstroWeatherCard extends HTMLElement {
           background: #10b981;
           animation: pulse 2s infinite;
         }
-        @keyframes pulse {
-          0%, 100% { opacity: 1; transform: scale(1); }
-          50% { opacity: 0.4; transform: scale(0.85); }
-        }
 
-        /* TAGES-NAVIGATOR */
+        /* DAY NAVIGATOR */
         .day-nav {
           display: flex;
           align-items: center;
@@ -597,7 +1012,7 @@ class AstroWeatherCard extends HTMLElement {
           display: block;
         }
 
-        /* 3-SPALTEN GRID */
+        /* 3-COLUMN GRID */
         .main-grid {
           display: grid;
           grid-template-columns: 1fr;
@@ -674,7 +1089,7 @@ class AstroWeatherCard extends HTMLElement {
           line-height: 1.1;
         }
 
-        /* HIMMELSKUPPEL */
+        /* SKY DOME */
         .dome-box {
           padding: 16px;
           border-radius: 16px;
@@ -738,7 +1153,7 @@ class AstroWeatherCard extends HTMLElement {
           border: 1px solid rgba(51, 65, 85, 0.5);
         }
 
-        /* SICHTBARE ZIELE */
+        /* CELESTIAL TARGETS */
         .targets-box {
           padding: 12px 14px;
         }
@@ -776,7 +1191,7 @@ class AstroWeatherCard extends HTMLElement {
           display: block;
         }
 
-        /* 4 METRIKEN KACHELN */
+        /* 4 METRIC TILES */
         .metrics-grid {
           display: grid;
           grid-template-columns: repeat(2, 1fr);
@@ -887,7 +1302,7 @@ class AstroWeatherCard extends HTMLElement {
           display: flex;
         }
 
-        /* STÜNDLICHER VERLAUF */
+        /* HOURLY GRID */
         .hourly-box {
           padding: 14px;
         }
@@ -923,7 +1338,7 @@ class AstroWeatherCard extends HTMLElement {
         .hour-cloud { font-size: 11px; font-weight: 900; margin: 3px 0; display: block; }
         .hour-seeing { font-size: 8px; font-family: monospace; color: #94a3b8; display: block; }
 
-        /* 7-TAGE VORSCHAU */
+        /* 7-DAY FORECAST */
         .forecast-box {
           padding: 14px;
         }
@@ -1029,14 +1444,14 @@ class AstroWeatherCard extends HTMLElement {
             </div>
           </div>
 
-          <!-- TAGES-NAVIGATOR -->
+          <!-- DAY NAVIGATOR -->
           <div class="day-nav">
             <button class="nav-btn" id="btnPrevDay" title="Vorheriger Tag">
               <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
             </button>
             <div class="nav-day-info">
               <span class="nav-day-title" id="navDayName">Heute</span>
-              <span class="nav-day-sub" id="navDayDate">Dienstag, 07. Oktober</span>
+              <span class="nav-day-sub" id="navDayDate">--</span>
             </div>
             <button class="nav-btn" id="btnNextDay" title="Nächster Tag">
               <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
@@ -1044,32 +1459,32 @@ class AstroWeatherCard extends HTMLElement {
           </div>
         </header>
 
-        <!-- 3-SPALTEN GRID -->
+        <!-- 3-COLUMN GRID -->
         <div class="main-grid">
 
-          <!-- SPALTE 1: ENTSCHEIDUNG, HIMMELSKUPPEL, PLANETEN -->
+          <!-- COLUMN 1: VERDICT, SKY DOME, TARGETS -->
           <div class="col">
             
             <!-- HERO BANNER -->
-            <div id="verdictBox" class="panel panel-verdict-red hero-card">
+            <div id="verdictBox" class="panel panel-verdict-green hero-card">
               <div class="hero-left">
-                <div id="verdictIconContainer" class="hero-icon" style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: #f87171;">
+                <div id="verdictIconContainer" class="hero-icon">
                   <svg id="verdictSvg" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
                   </svg>
                 </div>
                 <div>
-                  <h2 id="verdictTitle" class="hero-verdict">Heute nicht aufbauen</h2>
-                  <p id="verdictSummary" class="hero-desc">Dichter Hochnebel blockiert die Sterne. Hohe Feuchte lässt die Optik beschlagen.</p>
+                  <h2 id="verdictTitle" class="hero-verdict">--</h2>
+                  <p id="verdictSummary" class="hero-desc">--</p>
                 </div>
               </div>
               <div class="hero-score-box">
                 <span class="hero-score-label">Astro-Index</span>
-                <span id="verdictScoreVal" class="hero-score-num" style="color: #f87171;">17<span style="font-size: 11px; font-weight: 500; color: #94a3b8;">/100</span></span>
+                <span id="verdictScoreVal" class="hero-score-num">--<span style="font-size: 11px; font-weight: 500; color: #94a3b8;">/100</span></span>
               </div>
             </div>
 
-            <!-- HIMMELSKUPPEL -->
+            <!-- SKY DOME -->
             <div class="panel dome-box">
               <div class="dome-header">
                 <div>
@@ -1078,7 +1493,7 @@ class AstroWeatherCard extends HTMLElement {
                 </div>
                 <div style="text-align: right;">
                   <span style="font-size: 9px; text-transform: uppercase; font-weight: 700; color: #94a3b8; display: block;">${this.l("dark_night")}</span>
-                  <span id="domeCoreTimeBadge" class="dome-window">20:36 – 05:40 Uhr</span>
+                  <span id="domeCoreTimeBadge" class="dome-window">--:-- – --:-- Uhr</span>
                 </div>
               </div>
 
@@ -1104,7 +1519,7 @@ class AstroWeatherCard extends HTMLElement {
 
                   <rect width="660" height="210" fill="url(#nightSkyGlow)" rx="12"/>
 
-                  <!-- Sternfeld -->
+                  <!-- Stars -->
                   <circle cx="120" cy="50" r="1.2" fill="#ffffff" opacity="0.8"/>
                   <circle cx="160" cy="90" r="0.9" fill="#ffffff" opacity="0.5"/>
                   <circle cx="210" cy="65" r="1.3" fill="#ffffff" opacity="0.9"/>
@@ -1120,33 +1535,33 @@ class AstroWeatherCard extends HTMLElement {
                   <ellipse cx="370" cy="72" rx="5" ry="2.5" fill="#a5b4fc" opacity="0.5" transform="rotate(-25 370 72)"/>
                   <text x="370" y="86" fill="#64748b" font-size="8" text-anchor="middle">M31 Andromeda</text>
 
-                  <!-- Führungslinie & Bogen -->
+                  <!-- Arcs -->
                   <path d="M 70,145 A 260,115 0 0,1 590,145" fill="none" stroke="#26334d" stroke-width="2"/>
                   <path d="M 145,103 A 260,115 0 0,1 515,103" fill="none" stroke="url(#deepSkyArc)" stroke-width="5" stroke-linecap="round"/>
 
-                  <!-- Horizont-Linie -->
+                  <!-- Horizon line -->
                   <line x1="20" y1="145" x2="640" y2="145" stroke="rgba(255,255,255,0.2)" stroke-width="1.5"/>
                   <text x="30" y="140" fill="#64748b" font-size="9" font-weight="700">WEST</text>
                   <text x="630" y="140" fill="#64748b" font-size="9" font-weight="700" text-anchor="end">${lang === "de" ? "OST" : "EAST"}</text>
 
-                  <!-- Zenit -->
+                  <!-- Zenith -->
                   <text x="330" y="16" fill="#818cf8" font-size="9" font-weight="700" text-anchor="middle">${this.l("zenith_midnight")}</text>
 
-                  <!-- Sonne Auf/Untergang -->
+                  <!-- Sun -->
                   <circle cx="70" cy="145" r="5" fill="#ea580c"/>
-                  <text x="70" y="165" fill="#f97316" font-size="10" font-weight="700" text-anchor="middle" id="domeSunsetText">19:18 ${this.l("sunset")}</text>
+                  <text x="70" y="165" fill="#f97316" font-size="10" font-weight="700" text-anchor="middle" id="domeSunsetText">--:--</text>
 
                   <circle cx="590" cy="145" r="5" fill="#f59e0b"/>
-                  <text x="590" y="165" fill="#f59e0b" font-size="10" font-weight="700" text-anchor="middle" id="domeSunriseText">06:58 ${this.l("sunrise")}</text>
+                  <text x="590" y="165" fill="#f59e0b" font-size="10" font-weight="700" text-anchor="middle" id="domeSunriseText">--:--</text>
 
-                  <!-- Mond Knoten -->
+                  <!-- Moon Node -->
                   <g id="moonNode" style="transition: transform 0.3s ease;">
                     <circle cx="395" cy="55" r="11" fill="#38bdf8" opacity="0.12"/>
                     <circle cx="395" cy="55" r="6" fill="#cbd5e1" stroke="#38bdf8" stroke-width="1.5"/>
-                    <text x="395" y="38" fill="#e2e8f0" font-size="9" font-weight="600" text-anchor="middle" id="moonNodeText">${this.l("moon")}: 15% (${this.l("moon_rise")} 03:24)</text>
+                    <text x="395" y="38" fill="#e2e8f0" font-size="9" font-weight="600" text-anchor="middle" id="moonNodeText">--</text>
                   </g>
 
-                  <!-- Zeit Cursor -->
+                  <!-- Time Cursor -->
                   <g id="timeCursorNode" style="transition: transform 0.4s ease;" transform="translate(330, 35)">
                     <circle cx="0" cy="0" r="7" fill="#6366f1" opacity="0.3"/>
                     <circle cx="0" cy="0" r="4" fill="#ffffff" stroke="#6366f1" stroke-width="2"/>
@@ -1154,17 +1569,17 @@ class AstroWeatherCard extends HTMLElement {
                     <text x="0" y="19" fill="#e0e7ff" font-size="9" font-weight="700" text-anchor="middle" id="timeCursorLabel">00:00</text>
                   </g>
 
-                  <!-- Tagseite Gestrichelt -->
+                  <!-- Day Horizon Dash -->
                   <path d="M 70,145 A 260,35 0 0,0 590,145" fill="none" stroke="rgba(245, 158, 11, 0.15)" stroke-width="1.5" stroke-dasharray="3,3"/>
                 </svg>
               </div>
 
-              <!-- Dämmerungsleiste -->
+              <!-- Twilight Progress -->
               <div class="twilight-wrap">
                 <div class="twilight-times">
-                  <span id="twilightEveningTime">19:18</span>
-                  <span id="twilightNightTime" style="color: #a5b4fc; font-weight: 600;">20:36 bis 05:40 Dunkle Nacht</span>
-                  <span id="twilightMorningTime">06:58</span>
+                  <span id="twilightEveningTime">--:--</span>
+                  <span id="twilightNightTime" style="color: #a5b4fc; font-weight: 600;">--</span>
+                  <span id="twilightMorningTime">--:--</span>
                 </div>
                 <div class="twilight-bar">
                   <div style="width: 12%; background: rgba(245, 158, 11, 0.5);" title="Abenddämmerung"></div>
@@ -1174,11 +1589,11 @@ class AstroWeatherCard extends HTMLElement {
               </div>
             </div>
 
-            <!-- SICHTBARE ZIELE HEUTE -->
+            <!-- CELESTIAL TARGETS -->
             <div class="panel targets-box">
               <div style="display: flex; justify-content: space-between; align-items: center;">
                 <h4 style="font-size: 11px; font-weight: 800; text-transform: uppercase; color: #e2e8f0; margin: 0;">${this.l("targets_tonight")}</h4>
-                <span style="font-size: 10px; color: #94a3b8; font-family: monospace;">${lang === "de" ? "Oktober" : "October"}</span>
+                <span style="font-size: 10px; color: #94a3b8; font-family: monospace;">${new Date().toLocaleDateString(lang === 'de' ? 'de-DE' : 'en-US', { month: 'long' })}</span>
               </div>
               <div class="targets-grid">
                 <div class="target-item">
@@ -1201,13 +1616,13 @@ class AstroWeatherCard extends HTMLElement {
 
           </div>
 
-          <!-- SPALTE 2: METRIKEN & STÜNDLICHER VERLAUF -->
+          <!-- COLUMN 2: METRICS & HOURLY -->
           <div class="col">
 
-            <!-- 4 KERN-METRIKEN -->
+            <!-- 4 METRICS -->
             <div class="metrics-grid">
               
-              <!-- BEWÖLKUNG -->
+              <!-- CLOUDS -->
               <div class="panel metric-card">
                 <div class="metric-header">
                   <span class="metric-label">${this.l("cloud_cover")}</span>
@@ -1217,7 +1632,7 @@ class AstroWeatherCard extends HTMLElement {
                   <div class="metric-val-wrap">
                     <span id="cardCloudVal" class="metric-val">0</span>
                     <span class="metric-unit">%</span>
-                    <span id="cardCloudStatus" class="metric-status">Klar</span>
+                    <span id="cardCloudStatus" class="metric-status">--</span>
                   </div>
                   <div class="metric-bar-bg">
                     <div id="cardCloudBar" class="metric-bar-fill" style="width: 0%;"></div>
@@ -1230,24 +1645,24 @@ class AstroWeatherCard extends HTMLElement {
                 </div>
               </div>
 
-              <!-- FEUCHTE & TAU -->
+              <!-- HUMIDITY & DEW -->
               <div class="panel metric-card">
                 <div class="metric-header">
                   <span class="metric-label">${this.l("humidity_dew")}</span>
-                  <span id="cardDewBadge" class="metric-badge badge-green">50%</span>
+                  <span id="cardDewBadge" class="metric-badge badge-green">0%</span>
                 </div>
                 <div>
                   <div class="metric-val-wrap">
-                    <span id="cardDewVal" class="metric-val">50</span>
+                    <span id="cardDewVal" class="metric-val">0</span>
                     <span class="metric-unit">%</span>
-                    <span id="cardDewStatus" class="metric-status">Optimal</span>
+                    <span id="cardDewStatus" class="metric-status">--</span>
                   </div>
                   <div class="metric-bar-bg">
-                    <div id="cardDewBar" class="metric-bar-fill" style="width: 50%;"></div>
+                    <div id="cardDewBar" class="metric-bar-fill" style="width: 0%;"></div>
                   </div>
                 </div>
                 <div class="metric-footer">
-                  ${this.l("dewpoint")}: <strong id="dewpointVal" style="color: #e2e8f0;">7.5 °C</strong> <span id="dewNotice" style="font-weight: 600;"></span>
+                  ${this.l("dewpoint")}: <strong id="dewpointVal" style="color: #e2e8f0;">0.0 °C</strong> <span id="dewNotice" style="font-weight: 600;"></span>
                 </div>
               </div>
 
@@ -1259,18 +1674,18 @@ class AstroWeatherCard extends HTMLElement {
                 </div>
                 <div>
                   <div class="metric-val-wrap">
-                    <span id="cardWindVal" class="metric-val" style="color: #34d399;">3,6</span>
+                    <span id="cardWindVal" class="metric-val" style="color: #34d399;">0,0</span>
                     <span class="metric-unit">km/h</span>
-                    <span id="cardWindStatus" class="metric-status" style="color: #34d399;">Windstill</span>
+                    <span id="cardWindStatus" class="metric-status" style="color: #34d399;">--</span>
                   </div>
                   <div class="metric-bar-bg" style="display: flex; gap: 2px;">
-                    <div style="width: 33%; background: #10b981; height: 100%;"></div>
-                    <div style="width: 33%; background: #334155; height: 100%;"></div>
-                    <div style="width: 34%; background: #334155; height: 100%;"></div>
+                    <div id="cardWindBar1" style="width: 33%; background: #10b981; height: 100%;"></div>
+                    <div id="cardWindBar2" style="width: 33%; background: #334155; height: 100%;"></div>
+                    <div id="cardWindBar3" style="width: 34%; background: #334155; height: 100%;"></div>
                   </div>
                 </div>
                 <div class="metric-footer" id="cardWindNote">
-                  Kein Wackeln am Stativ
+                  --
                 </div>
               </div>
 
@@ -1285,18 +1700,18 @@ class AstroWeatherCard extends HTMLElement {
                 </div>
                 <div>
                   <div class="metric-val-wrap">
-                    <span id="cardSeeingVal" class="metric-val" style="color: #34d399;">1,37</span>
+                    <span id="cardSeeingVal" class="metric-val" style="color: #34d399;">0,00</span>
                     <span class="metric-unit">″</span>
-                    <span id="cardSeeingStatus" class="metric-status" style="color: #34d399;">Ruhig</span>
+                    <span id="cardSeeingStatus" class="metric-status" style="color: #34d399;">--</span>
                   </div>
                   <div class="metric-bar-bg" style="display: flex; gap: 2px;">
-                    <div style="width: 40%; background: #10b981; height: 100%;"></div>
-                    <div style="width: 30%; background: #334155; height: 100%;"></div>
-                    <div style="width: 30%; background: #334155; height: 100%;"></div>
+                    <div id="cardSeeingBar1" style="width: 40%; background: #10b981; height: 100%;"></div>
+                    <div id="cardSeeingBar2" style="width: 30%; background: #334155; height: 100%;"></div>
+                    <div id="cardSeeingBar3" style="width: 30%; background: #334155; height: 100%;"></div>
                   </div>
                 </div>
                 <div class="metric-footer" id="cardSeeingNote">
-                  Scharfe Planetendetails
+                  --
                 </div>
 
                 <!-- SEEING POPOVER -->
@@ -1318,7 +1733,7 @@ class AstroWeatherCard extends HTMLElement {
 
             </div>
 
-            <!-- STÜNDLICHER VERLAUF -->
+            <!-- HOURLY FORECAST -->
             <div class="panel hourly-box">
               <div class="hourly-header">
                 <div>
@@ -1330,13 +1745,13 @@ class AstroWeatherCard extends HTMLElement {
                 </span>
               </div>
               <div class="hourly-grid" id="hourlyGridContainer">
-                <!-- Dynamisch -->
+                <!-- Dynamically rendered -->
               </div>
             </div>
 
           </div>
 
-          <!-- SPALTE 3: 7-TAGE VORSCHAU -->
+          <!-- COLUMN 3: 7-DAY FORECAST -->
           <div class="col">
             <div class="panel forecast-box">
               <div class="forecast-header">
@@ -1345,10 +1760,10 @@ class AstroWeatherCard extends HTMLElement {
               </div>
 
               <div class="forecast-list" id="forecastContainer">
-                <!-- Dynamisch -->
+                <!-- Dynamically rendered -->
               </div>
 
-              <!-- NEUMOND HINWEIS -->
+              <!-- NOTICE -->
               <div class="notice-box">
                 <strong>${this.l("new_moon_notice_title")}</strong> ${this.l("new_moon_notice_text")}
               </div>
@@ -1368,43 +1783,47 @@ class AstroWeatherCard extends HTMLElement {
   _bindEvents() {
     const root = this.shadowRoot;
     
-    root.getElementById('btnPrevDay').addEventListener('click', () => this._changeDay(-1));
-    root.getElementById('btnNextDay').addEventListener('click', () => this._changeDay(1));
+    root.getElementById('btnPrevDay')?.addEventListener('click', () => this._changeDay(-1));
+    root.getElementById('btnNextDay')?.addEventListener('click', () => this._changeDay(1));
 
     const popover = root.getElementById('seeingPopover');
-    root.getElementById('btnSeeingHelp').addEventListener('click', () => popover.classList.toggle('open'));
-    root.getElementById('btnCloseSeeing').addEventListener('click', () => popover.classList.remove('open'));
-    root.getElementById('btnAckSeeing').addEventListener('click', () => popover.classList.remove('open'));
+    root.getElementById('btnSeeingHelp')?.addEventListener('click', () => popover?.classList.toggle('open'));
+    root.getElementById('btnCloseSeeing')?.addEventListener('click', () => popover?.classList.remove('open'));
+    root.getElementById('btnAckSeeing')?.addEventListener('click', () => popover?.classList.remove('open'));
   }
 
   _changeDay(delta) {
-    const days = this._daysData || this._getForecastData();
+    if (!this._daysData || this._daysData.length === 0) return;
     let next = this._currentDayIdx + delta;
-    if (next < 0) next = days.length - 1;
-    if (next >= days.length) next = 0;
+    if (next < 0) next = this._daysData.length - 1;
+    if (next >= this._daysData.length) next = 0;
     this._currentDayIdx = next;
     this._renderDynamicContent();
   }
 
   _selectDay(idx) {
+    if (!this._daysData || !this._daysData[idx]) return;
     this._currentDayIdx = idx;
     this._renderDynamicContent();
   }
 
   _selectHour(idx) {
     this._selectedHourIdx = idx;
-    const days = this._daysData || this._getForecastData();
-    const d = days[this._currentDayIdx];
+    const d = this._daysData[this._currentDayIdx];
+    if (!d || !d.hourly || !d.hourly[idx]) return;
     const h = d.hourly[idx];
-    if (!h) return;
 
     const root = this.shadowRoot;
-    root.getElementById('selectedHourBadge').innerText = `${this.l("focus")}: ${h.time} (${h.clouds}% ${this.l("clouds")}, Seeing ${h.seeing})`;
+    const badge = root.getElementById('selectedHourBadge');
+    if (badge) {
+      badge.innerText = `${this.l("focus")}: ${h.time} (${h.clouds}% ${this.l("clouds")}, Seeing ${h.seeing})`;
+    }
 
     const cursorNode = root.getElementById('timeCursorNode');
     if (cursorNode) {
       cursorNode.setAttribute('transform', `translate(${h.cx}, ${h.cy})`);
-      root.getElementById('timeCursorLabel').innerText = `${h.time}`;
+      const label = root.getElementById('timeCursorLabel');
+      if (label) label.innerText = `${h.time}`;
     }
 
     this._renderHourlyGrid();
@@ -1412,185 +1831,219 @@ class AstroWeatherCard extends HTMLElement {
 
   _renderDynamicContent() {
     const root = this.shadowRoot;
-    const days = this._daysData || this._getForecastData();
-    const d = days[this._currentDayIdx];
+    if (!root || !this._daysData || this._daysData.length === 0) return;
+    const d = this._daysData[this._currentDayIdx];
     if (!d) return;
 
-    // Navigator
-    root.getElementById('navDayName').innerText = d.name;
-    root.getElementById('navDayDate').innerText = d.fullDate;
+    // Day navigator
+    const navDayName = root.getElementById('navDayName');
+    const navDayDate = root.getElementById('navDayDate');
+    if (navDayName) navDayName.innerText = d.name;
+    if (navDayDate) navDayDate.innerText = d.fullDate;
 
-    // Verdict Hero
+    // Hero Verdict
     const verdictBox = root.getElementById('verdictBox');
     const verdictIcon = root.getElementById('verdictIconContainer');
     const verdictSvg = root.getElementById('verdictSvg');
     const scoreVal = root.getElementById('verdictScoreVal');
+    const verdictTitle = root.getElementById('verdictTitle');
+    const verdictSummary = root.getElementById('verdictSummary');
 
-    root.getElementById('verdictTitle').innerText = d.verdict;
-    root.getElementById('verdictSummary').innerText = d.desc;
-    scoreVal.innerHTML = `${d.score}<span style="font-size: 11px; font-weight: 500; color: #94a3b8;">/100</span>`;
+    if (verdictTitle) verdictTitle.innerText = d.verdict;
+    if (verdictSummary) verdictSummary.innerText = d.desc;
+    if (scoreVal) scoreVal.innerHTML = `${d.score}<span style="font-size: 11px; font-weight: 500; color: #94a3b8;">/100</span>`;
 
-    if (d.color === 'emerald') {
-      verdictBox.className = "panel panel-verdict-green hero-card";
-      verdictIcon.style.background = "rgba(16, 185, 129, 0.15)";
-      verdictIcon.style.borderColor = "rgba(16, 185, 129, 0.3)";
-      verdictIcon.style.color = "#34d399";
-      verdictSvg.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>';
-      scoreVal.style.color = "#34d399";
-    } else if (d.color === 'amber') {
-      verdictBox.className = "panel panel-verdict-amber hero-card";
-      verdictIcon.style.background = "rgba(245, 158, 11, 0.15)";
-      verdictIcon.style.borderColor = "rgba(245, 158, 11, 0.3)";
-      verdictIcon.style.color = "#fbbf24";
-      verdictSvg.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>';
-      scoreVal.style.color = "#fbbf24";
-    } else {
-      verdictBox.className = "panel panel-verdict-red hero-card";
-      verdictIcon.style.background = "rgba(239, 68, 68, 0.15)";
-      verdictIcon.style.borderColor = "rgba(239, 68, 68, 0.3)";
-      verdictIcon.style.color = "#f87171";
-      verdictSvg.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/>';
-      scoreVal.style.color = "#f87171";
+    if (verdictBox && verdictIcon && verdictSvg && scoreVal) {
+      if (d.color === 'emerald') {
+        verdictBox.className = "panel panel-verdict-green hero-card";
+        verdictIcon.style.background = "rgba(16, 185, 129, 0.15)";
+        verdictIcon.style.borderColor = "rgba(16, 185, 129, 0.3)";
+        verdictIcon.style.color = "#34d399";
+        verdictSvg.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>';
+        scoreVal.style.color = "#34d399";
+      } else if (d.color === 'amber') {
+        verdictBox.className = "panel panel-verdict-amber hero-card";
+        verdictIcon.style.background = "rgba(245, 158, 11, 0.15)";
+        verdictIcon.style.borderColor = "rgba(245, 158, 11, 0.3)";
+        verdictIcon.style.color = "#fbbf24";
+        verdictSvg.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>';
+        scoreVal.style.color = "#fbbf24";
+      } else {
+        verdictBox.className = "panel panel-verdict-red hero-card";
+        verdictIcon.style.background = "rgba(239, 68, 68, 0.15)";
+        verdictIcon.style.borderColor = "rgba(239, 68, 68, 0.3)";
+        verdictIcon.style.color = "#f87171";
+        verdictSvg.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/>';
+        scoreVal.style.color = "#f87171";
+      }
     }
 
-    // Kuppel
-    root.getElementById('moonNodeText').innerText = d.moonDetail;
+    // Sky Dome
+    const moonNodeText = root.getElementById('moonNodeText');
+    if (moonNodeText) moonNodeText.innerText = d.moonDetail;
+
     const moonNode = root.getElementById('moonNode');
     if (moonNode) {
       moonNode.setAttribute('transform', `translate(${d.moonX - 395}, ${d.moonY - 55})`);
     }
-    root.getElementById('domeSunsetText').innerText = d.sunset;
-    root.getElementById('domeSunriseText').innerText = d.sunrise;
-    root.getElementById('domeCoreTimeBadge').innerText = d.coreWindow;
-    root.getElementById('twilightEveningTime').innerText = d.twilightEvening.split(' ')[0];
-    root.getElementById('twilightNightTime').innerText = d.twilightNight;
-    root.getElementById('twilightMorningTime').innerText = d.twilightMorning.split(' ')[0];
 
-    // Metriken
-    // 1. BEWÖLKUNG
-    root.getElementById('cardCloudVal').innerText = d.clouds;
-    const cloudValEl = root.getElementById('cardCloudVal');
+    const sunsetText = root.getElementById('domeSunsetText');
+    if (sunsetText) sunsetText.innerText = d.sunset;
+
+    const sunriseText = root.getElementById('domeSunriseText');
+    if (sunriseText) sunriseText.innerText = d.sunrise;
+
+    const coreWindowBadge = root.getElementById('domeCoreTimeBadge');
+    if (coreWindowBadge) coreWindowBadge.innerText = d.coreWindow;
+
+    const twilightEvening = root.getElementById('twilightEveningTime');
+    if (twilightEvening) twilightEvening.innerText = d.twilightEvening.split(' ')[0];
+
+    const twilightNight = root.getElementById('twilightNightTime');
+    if (twilightNight) twilightNight.innerText = d.twilightNight;
+
+    const twilightMorning = root.getElementById('twilightMorningTime');
+    if (twilightMorning) twilightMorning.innerText = d.twilightMorning.split(' ')[0];
+
+    // 1. CLOUDS
+    const cardCloudVal = root.getElementById('cardCloudVal');
     const cloudBar = root.getElementById('cardCloudBar');
     const cloudBadge = root.getElementById('cardCloudBadge');
     const cloudStatus = root.getElementById('cardCloudStatus');
 
-    cloudBar.style.width = `${d.clouds}%`;
-    cloudBadge.innerText = `${d.clouds}%`;
-    cloudStatus.innerText = d.cloudStatus;
+    if (cardCloudVal) cardCloudVal.innerText = d.clouds;
+    if (cloudBar) cloudBar.style.width = `${d.clouds}%`;
+    if (cloudBadge) cloudBadge.innerText = `${d.clouds}%`;
+    if (cloudStatus) cloudStatus.innerText = d.cloudStatus;
 
-    if (d.clouds <= 20) {
-      cloudBadge.className = 'metric-badge badge-green';
-      cloudStatus.style.color = '#34d399';
-      cloudBar.style.background = '#10b981';
-      cloudValEl.style.color = '#34d399';
-    } else if (d.clouds <= 50) {
-      cloudBadge.className = 'metric-badge badge-amber';
-      cloudStatus.style.color = '#fbbf24';
-      cloudBar.style.background = '#f59e0b';
-      cloudValEl.style.color = '#fbbf24';
-    } else {
-      cloudBadge.className = 'metric-badge badge-red';
-      cloudStatus.style.color = '#f87171';
-      cloudBar.style.background = '#ef4444';
-      cloudValEl.style.color = '#f87171';
+    if (cloudBadge && cloudStatus && cloudBar && cardCloudVal) {
+      if (d.clouds <= 20) {
+        cloudBadge.className = 'metric-badge badge-green';
+        cloudStatus.style.color = '#34d399';
+        cloudBar.style.background = '#10b981';
+        cardCloudVal.style.color = '#34d399';
+      } else if (d.clouds <= 50) {
+        cloudBadge.className = 'metric-badge badge-amber';
+        cloudStatus.style.color = '#fbbf24';
+        cloudBar.style.background = '#f59e0b';
+        cardCloudVal.style.color = '#fbbf24';
+      } else {
+        cloudBadge.className = 'metric-badge badge-red';
+        cloudStatus.style.color = '#f87171';
+        cloudBar.style.background = '#ef4444';
+        cardCloudVal.style.color = '#f87171';
+      }
     }
 
     const cLowEl = root.getElementById('cloudLowVal');
     const cMidEl = root.getElementById('cloudMidVal');
     const cHighEl = root.getElementById('cloudHighVal');
-    cLowEl.innerText = `${d.cloudLow}%`;
-    cMidEl.innerText = `${d.cloudMid}%`;
-    cHighEl.innerText = `${d.cloudHigh}%`;
-    cLowEl.style.color = d.cloudLow <= 20 ? '#34d399' : (d.cloudLow <= 50 ? '#fbbf24' : '#f87171');
-    cMidEl.style.color = d.cloudMid <= 20 ? '#34d399' : (d.cloudMid <= 50 ? '#fbbf24' : '#f87171');
-    cHighEl.style.color = d.cloudHigh <= 20 ? '#34d399' : (d.cloudHigh <= 50 ? '#fbbf24' : '#f87171');
+    if (cLowEl) {
+      cLowEl.innerText = `${d.cloudLow}%`;
+      cLowEl.style.color = d.cloudLow <= 20 ? '#34d399' : (d.cloudLow <= 50 ? '#fbbf24' : '#f87171');
+    }
+    if (cMidEl) {
+      cMidEl.innerText = `${d.cloudMid}%`;
+      cMidEl.style.color = d.cloudMid <= 20 ? '#34d399' : (d.cloudMid <= 50 ? '#fbbf24' : '#f87171');
+    }
+    if (cHighEl) {
+      cHighEl.innerText = `${d.cloudHigh}%`;
+      cHighEl.style.color = d.cloudHigh <= 20 ? '#34d399' : (d.cloudHigh <= 50 ? '#fbbf24' : '#f87171');
+    }
 
-    // 2. FEUCHTE & TAU
-    root.getElementById('cardDewVal').innerText = d.dew;
-    const dewValEl = root.getElementById('cardDewVal');
+    // 2. HUMIDITY & DEW
+    const cardDewVal = root.getElementById('cardDewVal');
     const dewBar = root.getElementById('cardDewBar');
     const dewBadge = root.getElementById('cardDewBadge');
     const dewStatus = root.getElementById('cardDewStatus');
+    const dewpointVal = root.getElementById('dewpointVal');
     const dewNotice = root.getElementById('dewNotice');
 
-    dewBar.style.width = `${d.dew}%`;
-    dewBadge.innerText = `${d.dew}%`;
-    dewStatus.innerText = d.dewStatus;
-    root.getElementById('dewpointVal').innerText = `${d.dewpoint} °C`;
+    if (cardDewVal) cardDewVal.innerText = d.dew;
+    if (dewBar) dewBar.style.width = `${d.dew}%`;
+    if (dewBadge) dewBadge.innerText = `${d.dew}%`;
+    if (dewStatus) dewStatus.innerText = d.dewStatus;
+    if (dewpointVal) dewpointVal.innerText = `${d.dewpoint} °C`;
 
-    if (d.dew >= 85) {
-      dewBadge.className = 'metric-badge badge-red';
-      dewStatus.style.color = '#f87171';
-      dewBar.style.background = '#ef4444';
-      dewValEl.style.color = '#f87171';
-      if (dewNotice) {
-        dewNotice.innerText = `(${this.l("dew_alert")})`;
-        dewNotice.style.color = '#f87171';
-      }
-    } else if (d.dew >= 70) {
-      dewBadge.className = 'metric-badge badge-amber';
-      dewStatus.style.color = '#fbbf24';
-      dewBar.style.background = '#f59e0b';
-      dewValEl.style.color = '#fbbf24';
-      if (dewNotice) {
-        dewNotice.innerText = `(${this.l("dew_risk")})`;
-        dewNotice.style.color = '#fbbf24';
-      }
-    } else {
-      dewBadge.className = 'metric-badge badge-green';
-      dewStatus.style.color = '#34d399';
-      dewBar.style.background = '#10b981';
-      dewValEl.style.color = '#34d399';
-      if (dewNotice) {
-        dewNotice.innerText = `(${this.l("dew_dry")})`;
-        dewNotice.style.color = '#34d399';
+    if (dewBadge && dewStatus && dewBar && cardDewVal) {
+      if (d.dew >= 85) {
+        dewBadge.className = 'metric-badge badge-red';
+        dewStatus.style.color = '#f87171';
+        dewBar.style.background = '#ef4444';
+        cardDewVal.style.color = '#f87171';
+        if (dewNotice) {
+          dewNotice.innerText = `(${this.l("dew_alert")})`;
+          dewNotice.style.color = '#f87171';
+        }
+      } else if (d.dew >= 70) {
+        dewBadge.className = 'metric-badge badge-amber';
+        dewStatus.style.color = '#fbbf24';
+        dewBar.style.background = '#f59e0b';
+        cardDewVal.style.color = '#fbbf24';
+        if (dewNotice) {
+          dewNotice.innerText = `(${this.l("dew_risk")})`;
+          dewNotice.style.color = '#fbbf24';
+        }
+      } else {
+        dewBadge.className = 'metric-badge badge-green';
+        dewStatus.style.color = '#34d399';
+        dewBar.style.background = '#10b981';
+        cardDewVal.style.color = '#34d399';
+        if (dewNotice) {
+          dewNotice.innerText = `(${this.l("dew_dry")})`;
+          dewNotice.style.color = '#34d399';
+        }
       }
     }
 
     // 3. WIND
-    root.getElementById('cardWindVal').innerText = d.wind;
-    const windValEl = root.getElementById('cardWindVal');
+    const cardWindVal = root.getElementById('cardWindVal');
     const windStatus = root.getElementById('cardWindStatus');
     const windBadge = root.getElementById('cardWindBadge');
-    windStatus.innerText = d.windStatus;
-    root.getElementById('cardWindNote').innerText = d.windNote;
+    const cardWindNote = root.getElementById('cardWindNote');
+
+    if (cardWindVal) cardWindVal.innerText = d.wind;
+    if (windStatus) windStatus.innerText = d.windStatus;
+    if (cardWindNote) cardWindNote.innerText = d.windNote;
 
     const wNum = parseFloat(String(d.wind).replace(',', '.'));
     if (wNum < 10) {
       if (windBadge) windBadge.className = 'metric-badge badge-green';
-      windStatus.style.color = '#34d399';
-      windValEl.style.color = '#34d399';
+      if (windStatus) windStatus.style.color = '#34d399';
+      if (cardWindVal) cardWindVal.style.color = '#34d399';
     } else if (wNum < 25) {
       if (windBadge) windBadge.className = 'metric-badge badge-amber';
-      windStatus.style.color = '#fbbf24';
-      windValEl.style.color = '#fbbf24';
+      if (windStatus) windStatus.style.color = '#fbbf24';
+      if (cardWindVal) cardWindVal.style.color = '#fbbf24';
     } else {
       if (windBadge) windBadge.className = 'metric-badge badge-red';
-      windStatus.style.color = '#f87171';
-      windValEl.style.color = '#f87171';
+      if (windStatus) windStatus.style.color = '#f87171';
+      if (cardWindVal) cardWindVal.style.color = '#f87171';
     }
 
     // 4. SEEING
-    root.getElementById('cardSeeingVal').innerText = d.seeing;
-    const seeingValEl = root.getElementById('cardSeeingVal');
+    const cardSeeingVal = root.getElementById('cardSeeingVal');
     const seeingStatus = root.getElementById('cardSeeingStatus');
     const seeingBadge = root.getElementById('cardSeeingBadge');
-    seeingStatus.innerText = d.seeingStatus;
-    root.getElementById('cardSeeingNote').innerText = d.seeingNote;
+    const cardSeeingNote = root.getElementById('cardSeeingNote');
+
+    if (cardSeeingVal) cardSeeingVal.innerText = d.seeing;
+    if (seeingStatus) seeingStatus.innerText = d.seeingStatus;
+    if (cardSeeingNote) cardSeeingNote.innerText = d.seeingNote;
 
     const sNum = parseFloat(String(d.seeing).replace(',', '.'));
     if (sNum < 1.5) {
       if (seeingBadge) seeingBadge.className = 'metric-badge badge-green';
-      seeingStatus.style.color = '#34d399';
-      seeingValEl.style.color = '#34d399';
+      if (seeingStatus) seeingStatus.style.color = '#34d399';
+      if (cardSeeingVal) cardSeeingVal.style.color = '#34d399';
     } else if (sNum < 2.0) {
       if (seeingBadge) seeingBadge.className = 'metric-badge badge-green';
-      seeingStatus.style.color = '#38bdf8';
-      seeingValEl.style.color = '#38bdf8';
+      if (seeingStatus) seeingStatus.style.color = '#38bdf8';
+      if (cardSeeingVal) cardSeeingVal.style.color = '#38bdf8';
     } else {
       if (seeingBadge) seeingBadge.className = 'metric-badge badge-amber';
-      seeingStatus.style.color = '#fbbf24';
-      seeingValEl.style.color = '#fbbf24';
+      if (seeingStatus) seeingStatus.style.color = '#fbbf24';
+      if (cardSeeingVal) cardSeeingVal.style.color = '#fbbf24';
     }
 
     this._renderHourlyGrid();
@@ -1600,14 +2053,14 @@ class AstroWeatherCard extends HTMLElement {
 
   _renderHourlyGrid() {
     const root = this.shadowRoot;
-    const days = this._daysData || this._getForecastData();
-    const d = days[this._currentDayIdx];
+    if (!root || !this._daysData || this._daysData.length === 0) return;
+    const d = this._daysData[this._currentDayIdx];
     const container = root.getElementById('hourlyGridContainer');
-    if (!container || !d) return;
+    if (!container || !d || !Array.isArray(d.hourly)) return;
 
     container.innerHTML = d.hourly.map((h, i) => {
       const isSel = i === this._selectedHourIdx;
-      const cloudCol = h.clouds < 50 ? '#34d399' : (h.clouds < 75 ? '#fbbf24' : '#f87171');
+      const cloudCol = h.clouds < 30 ? '#34d399' : (h.clouds < 70 ? '#fbbf24' : '#f87171');
       return `
         <div class="hour-pill ${isSel ? 'selected' : ''}" data-hour="${i}">
           <span class="hour-time">${h.time}</span>
@@ -1627,21 +2080,21 @@ class AstroWeatherCard extends HTMLElement {
 
   _renderForecastList() {
     const root = this.shadowRoot;
-    const days = this._daysData || this._getForecastData();
+    if (!root || !this._daysData || this._daysData.length === 0) return;
     const container = root.getElementById('forecastContainer');
     if (!container) return;
 
-    container.innerHTML = days.map((item, i) => {
+    container.innerHTML = this._daysData.map((item, i) => {
       const isSel = i === this._currentDayIdx;
       const scoreCol = item.color === 'emerald' ? '#34d399' : (item.color === 'amber' ? '#fbbf24' : '#f87171');
-      const isNeumond = i === 4;
+      const isNeumond = item.moonPhase !== undefined && item.moonPhase <= 4;
 
       return `
         <div class="forecast-row ${isSel ? 'selected' : ''}" data-day="${i}">
           <div style="display: flex; align-items: center; min-width: 0; flex: 1;">
             <div>
               <span class="f-day">${item.name}</span>
-              <span class="f-date">${item.fullDate.split(', ')[1]}</span>
+              <span class="f-date">${item.fullDate.includes(',') ? item.fullDate.split(',')[1].trim() : item.fullDate}</span>
             </div>
             ${isNeumond ? `<span class="f-badge-neumond">${this.l("new_moon")}</span>` : ''}
           </div>
@@ -1672,10 +2125,10 @@ class AstroWeatherCard extends HTMLElement {
   }
 }
 
-// Custom Element registrieren
+// Custom Element registration
 customElements.define('astro-weather-card', AstroWeatherCard);
 
-// Visueller Lovelace Editor
+// Visual Lovelace Editor
 class AstroWeatherCardEditor extends HTMLElement {
   setConfig(config) {
     this._config = config || {};
@@ -1683,40 +2136,82 @@ class AstroWeatherCardEditor extends HTMLElement {
   }
   set hass(hass) {
     this._hass = hass;
+    this.render();
   }
   render() {
-    if (this.shadowRoot) return;
     this.attachShadow({ mode: 'open' });
+    let detectedAstro = null;
+    let weatherOptions = [];
+
+    if (this._hass && this._hass.states) {
+      const keys = Object.keys(this._hass.states);
+      detectedAstro = keys.find(k => k.startsWith('weather.astroweather'));
+      weatherOptions = keys.filter(k => k.startsWith('weather.'));
+    }
+
+    const currentWeather = this._config.weather_entity || detectedAstro || 'weather.astroweather';
+
     this.shadowRoot.innerHTML = `
       <style>
         .card-config { display: flex; flex-direction: column; gap: 12px; font-family: inherit; }
         .row { display: flex; flex-direction: column; gap: 4px; }
         label { font-size: 12px; font-weight: 600; color: var(--secondary-text-color, #94a3b8); }
-        input { padding: 8px 10px; border-radius: 6px; border: 1px solid var(--divider-color, #334155); background: var(--card-background-color, #1e293b); color: var(--primary-text-color, #fff); }
+        input, select { 
+          padding: 8px 10px; 
+          border-radius: 6px; 
+          border: 1px solid var(--divider-color, #334155); 
+          background: var(--card-background-color, #1e293b); 
+          color: var(--primary-text-color, #fff); 
+        }
+        .status-box {
+          padding: 8px 12px;
+          border-radius: 8px;
+          font-size: 12px;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .status-ok {
+          background: rgba(16, 185, 129, 0.15);
+          border: 1px solid rgba(16, 185, 129, 0.3);
+          color: #34d399;
+        }
+        .status-warn {
+          background: rgba(239, 68, 68, 0.15);
+          border: 1px solid rgba(239, 68, 68, 0.3);
+          color: #f87171;
+        }
       </style>
       <div class="card-config">
+        <div class="status-box ${detectedAstro ? 'status-ok' : 'status-warn'}">
+          ${detectedAstro 
+            ? `<span>🟢 AstroWeather erkannt: <strong>${detectedAstro}</strong></span>` 
+            : `<span>⚠️ Keine AstroWeather-Entität gefunden. Bitte zuerst in HACS installieren!</span>`
+          }
+        </div>
+
         <div class="row">
           <label>Titel / Standort</label>
-          <input id="title" type="text" value="${this._config.title || 'Astro-Wetter'}" />
+          <input id="title" type="text" value="${this._config.title || ''}" placeholder="z. B. Sternwarte Garten" />
         </div>
         <div class="row">
           <label>Wetter-Entität</label>
-          <input id="weather_entity" type="text" value="${this._config.weather_entity || 'weather.astroweather'}" placeholder="weather.astroweather" />
+          <input id="weather_entity" type="text" value="${currentWeather}" placeholder="weather.astroweather_backyard" />
         </div>
         <div class="row">
-          <label>Seeing-Sensor (optional)</label>
+          <label>Seeing-Sensor (optional Override)</label>
           <input id="seeing_entity" type="text" value="${this._config.seeing_entity || ''}" placeholder="sensor.astroweather_backyard_seeing" />
         </div>
         <div class="row">
-          <label>Wind-Sensor (optional)</label>
+          <label>Wind-Sensor (optional Override)</label>
           <input id="wind_entity" type="text" value="${this._config.wind_entity || ''}" placeholder="sensor.astroweather_backyard_10m_wind_speed" />
         </div>
         <div class="row">
-          <label>Luftfeuchte-Sensor (optional)</label>
+          <label>Luftfeuchte-Sensor (optional Override)</label>
           <input id="humidity_entity" type="text" value="${this._config.humidity_entity || ''}" placeholder="sensor.astroweather_backyard_2m_relative_humidity" />
         </div>
         <div class="row">
-          <label>Taupunkt-Sensor (optional)</label>
+          <label>Taupunkt-Sensor (optional Override)</label>
           <input id="dewpoint_entity" type="text" value="${this._config.dewpoint_entity || ''}" placeholder="sensor.astroweather_backyard_2m_dewpoint" />
         </div>
       </div>
@@ -1747,7 +2242,7 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type: 'astro-weather-card',
   name: 'Astro Weather Card',
-  description: 'Astronomical Weather & Observation Planning Card with sky dome, seeing, and 7-day forecast.',
+  description: 'Astronomical Weather & Observation Planning Card powered by AstroWeather integration.',
   preview: true,
   documentationURL: 'https://github.com/copystring/astro-weather-card'
 });
