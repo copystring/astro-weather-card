@@ -63,7 +63,9 @@ The card automatically transitions into a fluid, single-column command center on
 
 ### Method 1: HACS (Recommended)
 
-1. Open **HACS** in your Home Assistant interface.
+[![Open your Home Assistant and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=copystring&repository=astro-weather-card&category=plugin)
+
+1. Open **HACS** in your Home Assistant interface (or click the badge above).
 2. Click the three vertical dots (**⋮**) in the top right corner and select **Custom repositories**.
 3. In the dialog, paste the repository URL:
    ```text
