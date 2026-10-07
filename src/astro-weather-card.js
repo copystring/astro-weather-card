@@ -184,7 +184,7 @@ class AstroWeatherCard extends HTMLElement {
         dew: 94, dewpoint: 6.2, dewStatus: l("dew_risk"),
         wind: 7.2, windStatus: l("calm"), windNote: l("no_shaking"),
         seeing: 1.65, seeingStatus: l("sharp"), seeingNote: l("steady"),
-        moon: `🌑 ${l("new_moon")}`, moonDetail: `${l("new_moon")}`, moonX: 330, moonY: 35,
+        moon: "🌑 0%", moonDetail: `${l("new_moon")}`, moonX: 330, moonY: 35,
         sunset: `19:08 ${l("sunset")}`, sunrise: `07:05 ${l("sunrise")}`, coreWindow: "20:27 – 05:48",
         twilightEvening: `19:08 (${l("dusk")})`, twilightNight: `20:27 - 05:48 ${l("dark_night")}`, twilightMorning: `07:05 (${l("dawn")})`,
         hourly: [
@@ -284,6 +284,7 @@ class AstroWeatherCard extends HTMLElement {
 
   _render() {
     this._daysData = this._getForecastData();
+    const lang = this._getLang();
     
     // Standort-Label ermitteln (aus Config oder Zone Home)
     let locationLabel = this._config.title || this.l("title_default");
@@ -1005,23 +1006,23 @@ class AstroWeatherCard extends HTMLElement {
                   <!-- Horizont-Linie -->
                   <line x1="20" y1="145" x2="640" y2="145" stroke="rgba(255,255,255,0.2)" stroke-width="1.5"/>
                   <text x="30" y="140" fill="#64748b" font-size="9" font-weight="700">WEST</text>
-                  <text x="630" y="140" fill="#64748b" font-size="9" font-weight="700" text-anchor="end">OST</text>
+                  <text x="630" y="140" fill="#64748b" font-size="9" font-weight="700" text-anchor="end">${lang === "de" ? "OST" : "EAST"}</text>
 
                   <!-- Zenit -->
                   <text x="330" y="16" fill="#818cf8" font-size="9" font-weight="700" text-anchor="middle">${this.l("zenith_midnight")}</text>
 
                   <!-- Sonne Auf/Untergang -->
                   <circle cx="70" cy="145" r="5" fill="#ea580c"/>
-                  <text x="70" y="165" fill="#f97316" font-size="10" font-weight="700" text-anchor="middle" id="domeSunsetText">19:18 Untergang</text>
+                  <text x="70" y="165" fill="#f97316" font-size="10" font-weight="700" text-anchor="middle" id="domeSunsetText">19:18 ${this.l("sunset")}</text>
 
                   <circle cx="590" cy="145" r="5" fill="#f59e0b"/>
-                  <text x="590" y="165" fill="#f59e0b" font-size="10" font-weight="700" text-anchor="middle" id="domeSunriseText">06:58 Aufgang</text>
+                  <text x="590" y="165" fill="#f59e0b" font-size="10" font-weight="700" text-anchor="middle" id="domeSunriseText">06:58 ${this.l("sunrise")}</text>
 
                   <!-- Mond Knoten -->
                   <g id="moonNode" style="transition: transform 0.3s ease;">
                     <circle cx="395" cy="55" r="11" fill="#38bdf8" opacity="0.12"/>
                     <circle cx="395" cy="55" r="6" fill="#cbd5e1" stroke="#38bdf8" stroke-width="1.5"/>
-                    <text x="395" y="38" fill="#e2e8f0" font-size="9" font-weight="600" text-anchor="middle" id="moonNodeText">Mond: 15% (Aufgang 03:24)</text>
+                    <text x="395" y="38" fill="#e2e8f0" font-size="9" font-weight="600" text-anchor="middle" id="moonNodeText">${this.l("moon")}: 15% (${this.l("moon_rise")} 03:24)</text>
                   </g>
 
                   <!-- Zeit Cursor -->
@@ -1056,7 +1057,7 @@ class AstroWeatherCard extends HTMLElement {
             <div class="panel targets-box">
               <div style="display: flex; justify-content: space-between; align-items: center;">
                 <h4 style="font-size: 11px; font-weight: 800; text-transform: uppercase; color: #e2e8f0; margin: 0;">${this.l("targets_tonight")}</h4>
-                <span style="font-size: 10px; color: #94a3b8; font-family: monospace;">Oktober</span>
+                <span style="font-size: 10px; color: #94a3b8; font-family: monospace;">${lang === "de" ? "Oktober" : "October"}</span>
               </div>
               <div class="targets-grid">
                 <div class="target-item">
@@ -1066,7 +1067,7 @@ class AstroWeatherCard extends HTMLElement {
                 </div>
                 <div class="target-item">
                   <span class="target-name" style="color: #38bdf8;">⚪ Jupiter</span>
-                  <span class="target-time">Ab 22:45</span>
+                  <span class="target-time">${lang === "de" ? "Ab 22:45" : "From 22:45"}</span>
                   <span class="target-sub">${this.l("four_moons")}</span>
                 </div>
                 <div class="target-item">
@@ -1125,7 +1126,7 @@ class AstroWeatherCard extends HTMLElement {
                   </div>
                 </div>
                 <div class="metric-footer">
-                  Taupunkt: <strong id="dewpointVal" style="color: #e2e8f0;">7.5 °C</strong> (Heizband)
+                  ${this.l("dewpoint")}: <strong id="dewpointVal" style="color: #e2e8f0;">7.5 °C</strong> (${this.l("dew_heater")})
                 </div>
               </div>
 
@@ -1133,7 +1134,7 @@ class AstroWeatherCard extends HTMLElement {
               <div class="panel metric-card">
                 <div class="metric-header">
                   <span class="metric-label">${this.l("wind_mount")}</span>
-                  <span id="cardWindBadge" class="metric-badge badge-green">Ruhig</span>
+                  <span id="cardWindBadge" class="metric-badge badge-green">${this.l("calm")}</span>
                 </div>
                 <div>
                   <div class="metric-val-wrap">
@@ -1159,7 +1160,7 @@ class AstroWeatherCard extends HTMLElement {
                     <span class="metric-label">${this.l("seeing")}</span>
                     <button class="help-btn" id="btnSeeingHelp" title="Was ist Seeing?">?</button>
                   </div>
-                  <span id="cardSeeingBadge" class="metric-badge badge-green">Scharf</span>
+                  <span id="cardSeeingBadge" class="metric-badge badge-green">${this.l("sharp")}</span>
                 </div>
                 <div>
                   <div class="metric-val-wrap">
@@ -1277,7 +1278,7 @@ class AstroWeatherCard extends HTMLElement {
     if (!h) return;
 
     const root = this.shadowRoot;
-    root.getElementById('selectedHourBadge').innerText = `Fokus: ${h.time} (${h.clouds}% Wolken, Seeing ${h.seeing})`;
+    root.getElementById('selectedHourBadge').innerText = `${this.l("focus")}: ${h.time} (${h.clouds}% ${this.l("clouds")}, Seeing ${h.seeing})`;
 
     const cursorNode = root.getElementById('timeCursorNode');
     if (cursorNode) {
@@ -1417,7 +1418,7 @@ class AstroWeatherCard extends HTMLElement {
               <span class="f-day">${item.name}</span>
               <span class="f-date">${item.fullDate.split(', ')[1]}</span>
             </div>
-            ${isNeumond ? '<span class="f-badge-neumond">NEUMOND</span>' : ''}
+            ${isNeumond ? `<span class="f-badge-neumond">${this.l("new_moon")}</span>` : ''}
           </div>
 
           <div style="display: flex; align-items: center; gap: 8px; font-size: 11px; color: #cbd5e1; margin: 0 10px;">
