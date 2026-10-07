@@ -25,6 +25,16 @@ class AstroWeatherCard extends HTMLElement {
     this._config = {};
   }
 
+  connectedCallback() {
+    if (!this._initialized) {
+      this._render();
+    }
+  }
+
+  static async getConfigElement() {
+    return document.createElement('astro-weather-card-editor');
+  }
+
   static getStubConfig() {
     return {
       title: "Astro-Wetter",
@@ -1419,6 +1429,73 @@ class AstroWeatherCard extends HTMLElement {
 
 // Custom Element registrieren
 customElements.define('astro-weather-card', AstroWeatherCard);
+
+// Visueller Lovelace Editor
+class AstroWeatherCardEditor extends HTMLElement {
+  setConfig(config) {
+    this._config = config || {};
+    this.render();
+  }
+  set hass(hass) {
+    this._hass = hass;
+  }
+  render() {
+    if (this.shadowRoot) return;
+    this.attachShadow({ mode: 'open' });
+    this.shadowRoot.innerHTML = `
+      <style>
+        .card-config { display: flex; flex-direction: column; gap: 12px; font-family: inherit; }
+        .row { display: flex; flex-direction: column; gap: 4px; }
+        label { font-size: 12px; font-weight: 600; color: var(--secondary-text-color, #94a3b8); }
+        input { padding: 8px 10px; border-radius: 6px; border: 1px solid var(--divider-color, #334155); background: var(--card-background-color, #1e293b); color: var(--primary-text-color, #fff); }
+      </style>
+      <div class="card-config">
+        <div class="row">
+          <label>Titel / Standort</label>
+          <input id="title" type="text" value="${this._config.title || 'Astro-Wetter'}" />
+        </div>
+        <div class="row">
+          <label>Wetter-Entität</label>
+          <input id="weather_entity" type="text" value="${this._config.weather_entity || 'weather.astroweather'}" placeholder="weather.astroweather" />
+        </div>
+        <div class="row">
+          <label>Seeing-Sensor (optional)</label>
+          <input id="seeing_entity" type="text" value="${this._config.seeing_entity || ''}" placeholder="sensor.astroweather_backyard_seeing" />
+        </div>
+        <div class="row">
+          <label>Wind-Sensor (optional)</label>
+          <input id="wind_entity" type="text" value="${this._config.wind_entity || ''}" placeholder="sensor.astroweather_backyard_10m_wind_speed" />
+        </div>
+        <div class="row">
+          <label>Luftfeuchte-Sensor (optional)</label>
+          <input id="humidity_entity" type="text" value="${this._config.humidity_entity || ''}" placeholder="sensor.astroweather_backyard_2m_relative_humidity" />
+        </div>
+        <div class="row">
+          <label>Taupunkt-Sensor (optional)</label>
+          <input id="dewpoint_entity" type="text" value="${this._config.dewpoint_entity || ''}" placeholder="sensor.astroweather_backyard_2m_dewpoint" />
+        </div>
+      </div>
+    `;
+
+    const inputs = this.shadowRoot.querySelectorAll('input');
+    inputs.forEach(input => {
+      input.addEventListener('change', () => {
+        const newConfig = { ...this._config };
+        inputs.forEach(i => {
+          if (i.value) newConfig[i.id] = i.value;
+          else delete newConfig[i.id];
+        });
+        const event = new CustomEvent('config-changed', {
+          detail: { config: newConfig },
+          bubbles: true,
+          composed: true,
+        });
+        this.dispatchEvent(event);
+      });
+    });
+  }
+}
+customElements.define('astro-weather-card-editor', AstroWeatherCardEditor);
 
 // Lovelace Custom Card Picker
 window.customCards = window.customCards || [];
