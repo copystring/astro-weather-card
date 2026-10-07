@@ -7,6 +7,7 @@
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/default)
 [![GitHub release](https://img.shields.io/github/v/release/copystring/astro-weather-card?color=indigo)](https://github.com/copystring/astro-weather-card/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-emerald.svg)](https://opensource.org/licenses/MIT)
+[![Donate with PayPal](https://img.shields.io/badge/Donate-PayPal-00457C.svg?logo=paypal)](https://www.paypal.com/donate/?business=copystring%40gmail.com&currency_code=EUR)
 [![Maintenance](https://img.shields.io/badge/Maintained%3F-yes-green.svg)](https://github.com/copystring/astro-weather-card/graphs/commit-activity)
 
 <br/>
@@ -139,6 +140,16 @@ npm install
 # Build release bundle
 npm run build
 ```
+
+---
+
+## ☕ Support the Project
+
+If this card helps you plan your stargazing nights or astrophotography sessions, you can support its ongoing development:
+
+[![Donate with PayPal](https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif)](https://www.paypal.com/donate/?business=copystring%40gmail.com&currency_code=EUR)
+
+Every coffee helps keep the project maintained and updated with new features! 🔭🌟
 
 ---
 
